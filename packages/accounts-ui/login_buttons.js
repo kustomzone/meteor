@@ -1,4 +1,22 @@
 (function () {
+  //
+  // Session
+  //
+
+  var DROPDOWN_VISIBLE_KEY = 'Meteor.loginButtons.dropdownVisible';
+  var IN_SIGNUP_FLOW_KEY = 'Meteor.loginButtons.inSignupFlow';
+  var ERROR_MESSAGE_KEY = 'Meteor.loginButtons.errorMessage';
+
+  var resetSession = function () {
+    Session.set(IN_SIGNUP_FLOW_KEY, false);
+    Session.set(DROPDOWN_VISIBLE_KEY, false);
+    Session.set(ERROR_MESSAGE_KEY, null);
+  };
+
+
+  //
+  // loginButtons template
+  //
 
   Template.loginButtons.events = {
     'click #login-buttons-Facebook': function () {
@@ -42,10 +60,127 @@
 
     'click #login-buttons-logout': function() {
       Meteor.logout();
+      resetSession();
     }
   };
 
+  // decide whether we should show a dropdown rather than a row of
+  // buttons
+  Template.loginButtons.dropdown = function () {
+    var services = getLoginServices();
+
+    var hasPasswordService = _.any(services, function (service) {
+      return service.name === 'Password';
+    });
+
+    return hasPasswordService || services.length > 2;
+  };
+
   Template.loginButtons.services = function () {
+    return getLoginServices();
+  };
+
+  //
+  // loginButtonsServiceRow template
+  //
+
+  Template.loginButtonsServicesRow.events = {
+    'click #login-buttons-password': function () {
+      login();
+    },
+    'click #signup-link': function () {
+      Session.set(ERROR_MESSAGE_KEY, null);
+      Session.set(IN_SIGNUP_FLOW_KEY, true);
+    },
+    'keypress #login-password': function (event) {
+      if (event.keyCode === 13 && !Session.get(IN_SIGNUP_FLOW_KEY))
+        login();
+    },
+    'keypress #login-password-again': function (event) {
+      if (event.keyCode === 13 && Session.get(IN_SIGNUP_FLOW_KEY))
+        signup();
+    }
+  };
+
+  Template.loginButtonsServicesRow.services = function () {
+    return getLoginServices();
+  };
+
+  Template.loginButtonsServicesRow.isPasswordService = function () {
+    return this.name === 'Password';
+  };
+
+  Template.loginButtonsServicesRow.hasOtherServices = function () {
+    return getLoginServices().length > 1;
+  };
+
+
+  //
+  // loginButtonsServicesRowDynamicPart template
+  //
+
+  Template.loginButtonsServicesRowDynamicPart.errorMessage = function () {
+    return Session.get(ERROR_MESSAGE_KEY);
+  };
+
+  Template.loginButtonsServicesRowDynamicPart.inSignupFlow = function () {
+    return Session.get(IN_SIGNUP_FLOW_KEY);
+  };
+
+
+  //
+  // loginButtonsServicesDropdown template
+  //
+
+  Template.loginButtonsServicesDropdown.events = {
+    'click .login-link-text': function () {
+      Session.set(DROPDOWN_VISIBLE_KEY, true);
+    },
+    'click .login-close-text': function () {
+      resetSession();
+    }
+  };
+
+  Template.loginButtonsServicesDropdown.dropdownVisible = function () {
+    return Session.get(DROPDOWN_VISIBLE_KEY);
+  };
+
+
+  //
+  // helpers
+  //
+
+  var login = function () {
+    var username = document.getElementById('login-username').value;
+    var password = document.getElementById('login-password').value;
+
+    Meteor.loginWithPassword(username, password, function (error, result) {
+      if (error) {
+        if (error.error === 'user not found')
+          Session.set(ERROR_MESSAGE_KEY, "User not found");
+        else if (error.error === 'bad password')
+          Session.set(ERROR_MESSAGE_KEY, "Wrong password");
+      }
+    });
+  };
+
+  var signup = function () {
+    var username = document.getElementById('login-username').value;
+    var password = document.getElementById('login-password').value;
+    var passwordAgain = document.getElementById('login-password-again').value;
+
+    if (username.length < 3) {
+      Session.set(ERROR_MESSAGE_KEY, "Username must be at least 3 characters long");
+    } else if (password.length < 6) {
+      Session.set(ERROR_MESSAGE_KEY, "Password must be at least 6 characters long");
+    } else if (password !== passwordAgain) {
+      Session.set(ERROR_MESSAGE_KEY, "Passwords don't match");
+    } else {
+      Meteor.loginNewUser(username, password);
+    }
+  };
+
+  var getLoginServices = function () {
     var ret = [];
     // XXX It would be nice if there were an automated way to read the
     // list of services, such as _.each(Meteor.accounts.services, ...)
@@ -56,7 +191,11 @@
     if (Meteor.accounts.weibo)
       ret.push({name: 'Weibo'});
 
+    // make sure to put accounts last, since this is the order in the
+    // ui as well
+    if (Meteor.accounts.passwords)
+      ret.push({name: 'Password'});
+
     return ret;
   };
-
 })();

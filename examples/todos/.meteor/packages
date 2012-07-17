@@ -6,6 +6,6 @@
 underscore
 backbone
 accounts
-accounts-facebook
-accounts-google
 accounts-ui
+accounts-passwords
+accounts-weibo
