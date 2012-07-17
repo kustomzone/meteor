@@ -43,7 +43,7 @@
     margin-left: 5px; /* so that other elements aren't too close */
 }
 
-.login-dropdown-list .login-button {
+#login-dropdown-list .login-button {
     width: 158px;
     margin-bottom: 4px;
 }
@@ -80,7 +80,7 @@
     clear: right;
 }
 
-#login-buttons .login-dropdown-list {
+#login-dropdown-list {
     position: absolute;
     border: 1px solid black;
     z-index: 1000;
