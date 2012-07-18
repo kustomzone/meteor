@@ -1,8 +1,11 @@
 (function () {
 
-  // XXX options to add to new user
-  // XXX callback
-  Meteor.loginNewUser = function (username, password, callback) {
+  Meteor.createUser = function (options, extra, callback) {
+    if (typeof opt_extra === "function") {
+      callback = extra;
+      extra = {};
+    }
+
     var verifier = Meteor._srp.generateVerifier(password);
 
     Meteor.apply('login', [
@@ -22,7 +25,6 @@
         callback && callback(null, {message: 'Success'});
       }
     });
-
   };
 
   Meteor.loginWithPassword = function (username, password, callback) {

@@ -87,6 +87,7 @@
   // @param serviceData {Object} attributes to store on the user record's
   //   specific service subobject
   // @returns {String} userId
+  // xcxc change signature to use options, as defined in hackpad
   Meteor.accounts.updateOrCreateUser = function(email,
                                                 userData,
                                                 serviceName,

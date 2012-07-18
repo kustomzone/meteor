@@ -7,6 +7,19 @@
     null /*driver*/,
     true /*preventAutopublish*/);
 
+  // onCreateUser hook
+  var onCreateUserHook = null;
+  Meteor.accounts.onCreateUser = function (func) {
+    if (onCreateUserHook)
+      throw new Meteor.Error("Can only call onCreateUser once");
+    else
+      onCreateUserHook = func;
+  };
+
+
+  Meteor.accounts.onCreateUser = function (func) {
+    // xcxc
+  };
 
   Meteor.methods({
     beginSrp: function (request) {
@@ -36,6 +49,36 @@
       Meteor.accounts._srpChallenges.insert(serialized);
 
       return challenge;
+    },
+
+    createUser: function (options, extra) {
+      var username = options.username;
+      if (!username)
+        throw new Meteor.Error("need to set a username");
+
+      if (Meteor.users.findOne({username: username}))
+        throw new Meteor.Error("user already exists");
+
+      // XXX validate verifier
+
+      // xcxc support just receiving password
+      // xcxc support email and no username, or both
+      // xcxc if email, email -> emails in object
+      var user = {username: username, services: {srp: options.srp}};
+
+      if (options.email)
+        user.email = options.email;
+
+      if (onCreateUserHook) {
+        user = onCreateUserHook(options, extra, user);
+      } else {
+        _.extend(user, extra); // xcxc private fields?
+      }
+
+      // xcxc use updateOrCreateUser
+      var userId = Meteor.users.insert(user);
+      var loginToken = Meteor.accounts._loginTokens.insert({userId: userId});
+      return {token: loginToken, id: userId};
     }
   });
 
@@ -58,27 +101,7 @@
 
 
   // handler to login with a new user
-  Meteor.accounts.registerLoginHandler(function (options) {
-    if (!options.newUser)
-      return undefined; // don't handle
-
-    if (!options.newUser.username)
-      throw new Meteor.Error("need to set a username");
-    var username = options.newUser.username;
-
-    if (Meteor.users.findOne({username: username}))
-      throw new Meteor.Error("user already exists");
-
-    // XXX validate verifier
-
-    // XXX use updateOrCreateUser
-
-    var user = {username: username, services: {srp: options.newUser.verifier}};
-    var userId = Meteor.users.insert(user);
-
-    var loginToken = Meteor.accounts._loginTokens.insert({userId: userId});
-
-    return {token: loginToken, id: userId};
+  Meteor.methods({
   });
 
 
