@@ -8,58 +8,60 @@
     Meteor.apply('login', [
       {newUser: {username: username, verifier: verifier}}
     ], {wait: true}, function (error, result) {
-      if (error) {
-        console.log(error);
+      if (error || !result) {
+        error = error || new Error("No result");
         callback && callback(error);
-        // XXX this hides the error! and we do it other places in auth
-        throw error;
+        return;
       }
 
-      if (!result) {
-        return;
-      } else {
-        Meteor.accounts.makeClientLoggedIn(result.id, result.token);
-        callback && callback(null, {message: 'Success'});
-      }
+      Meteor.accounts.makeClientLoggedIn(result.id, result.token);
+      callback && callback(null, {message: 'Success'});
     });
 
   };
 
-  Meteor.loginWithPassword = function (username, password, callback) {
+  // @param selector {String|Object} One of the following:
+  //   - {username: (username)}
+  //   - {email: (email)}
+  //   - a string which may be a username or email, depending on whether
+  //     it contains "@".
+  // @param password {String}
+  // @param callback {Function(error|undefined)}
+  Meteor.loginWithPassword = function (selector, password, callback) {
     var srp = new Meteor._srp.Client(password);
     var request = srp.startExchange();
 
-    request.username = username; // XXX
-    Meteor.apply('beginSrp', [request], function (error, result) {
-      if (error) {
-        console.log(error);
+    if (typeof selector === 'string')
+      if (selector.indexOf('@') === -1)
+        selector = {username: selector};
+      else
+        selector = {email: selector};
+    request.user = selector;
+
+    Meteor.apply('beginPasswordExchange', [request], function (error, result) {
+      if (error || !result) {
+        error = error || new Error("No result from call to beginPasswordExchange");
         callback && callback(error);
-        // XXX this hides the error! and we do it other places in auth
-        throw error;
+        return;
       }
 
       var response = srp.respondToChallenge(result);
       Meteor.apply('login', [
         {srp: response}
       ], {wait: true}, function (error, result) {
-        if (error) {
+        if (error || !result) {
+          error = error || new Error("No result from call to login");
           callback && callback(error);
-          console.log(error);
-          // XXX this hides the error! and we do it other places in auth
-          throw error;
-        }
-
-        if (!result) {
           return;
         }
 
-        if (!srp.verifyConfirmation(result.srp)) {
-          console.log('no verify!');
-          throw new Meteor.Error("server is cheating!");
+        if (!srp.verifyConfirmation({HAMK: result.HAMK})) {
+          callback && callback(new Error("Server is cheating!"));
+          return;
         }
 
         Meteor.accounts.makeClientLoggedIn(result.id, result.token);
-        callback && callback(null, {message: "Success"});
+        callback && callback();
       });
     });
   };

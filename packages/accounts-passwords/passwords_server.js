@@ -9,23 +9,47 @@
 
 
   Meteor.methods({
-    beginSrp: function (request) {
-      var username = request.username;
-      if (!username)
-        throw new Meteor.Error("must provide a username");
+    // @param request {Object} with fields:
+    //   user: either {username: (username)} or {email: (email)}
+    //   A: hex encoded int. the client's public key for this exchange
+    // @returns {Object} with fields:
+    //   identiy: string uuid
+    //   salt: string uuid
+    //   B: hex encoded int. server's public key for this exchange
+    beginPasswordExchange: function (request) {
+      if (!request.user)
+        throw new Meteor.Error("Must pass a user property in request");
 
-      var user = Meteor.users.findOne({username: username});
-      if (!user || !user.services || !user.services.srp)
+      var username = request.user.username;
+      var email = request.user.email;
+
+      if (!username && !email)
+        throw new Meteor.Error("Must pass either username or email in request.user");
+      if (username && email)
+        throw new Meteor.Error("Can't pass both username and email in request.user");
+
+      var selector;
+      if (username)
+        selector = {username: username};
+      else /* if (email) */
+        selector = {emails: email};
+
+      var user = Meteor.users.findOne(selector);
+      if (!user)
         throw new Meteor.Error("user not found");
-      var verifier = user.services.srp;
+      if (!user.services || !user.services.password ||
+          !user.services.password.srp)
+        throw new Meteor.Error("user has no password set");
 
+      var verifier = user.services.password.srp;
       var srp = new Meteor._srp.Server(verifier);
-      var challenge = srp.issueChallenge(request);
+      var challenge = srp.issueChallenge({A: request.A});
 
       // XXX It would be better to put this on the session
       // somehow. However, this gets complicated when interacting with
       // reconnect on the client. The client should detect the reconnect
       // and re-start the exchange.
+      // https://app.asana.com/0/988582960612/1278583012594
       //
       // Instead we store M and HAMK from SRP (abstraction violation!)
       // and let any session login if it knows M. This is somewhat
@@ -39,11 +63,12 @@
     }
   });
 
-
   // handler to login with password
   Meteor.accounts.registerLoginHandler(function (options) {
     if (!options.srp)
       return undefined; // don't handle
+    if (!options.srp.M)
+      throw new Meteor.Error("must pass M in options.srp");
 
     var serialized = Meteor.accounts._srpChallenges.findOne(
       {M: options.srp.M});
@@ -53,7 +78,13 @@
     var userId = serialized.userId;
     var loginToken = Meteor.accounts._loginTokens.insert({userId: userId});
 
-    return {token: loginToken, id: userId, srp: {HAMK: serialized.HAMK}};
+    // XXX we should remove srpChallenge documents from mongo, but we
+    // need to make sure reconnects still work (meaning we can't
+    // remove them right after they've been used). This will also be
+    // fixed if we store challenges in session.
+    // https://app.asana.com/0/988582960612/1278583012594
+
+    return {token: loginToken, id: userId, HAMK: serialized.HAMK};
   });
 
 
@@ -73,7 +104,7 @@
 
     // XXX use updateOrCreateUser
 
-    var user = {username: username, services: {srp: options.newUser.verifier}};
+    var user = {username: username, services: {password: {srp: options.newUser.verifier}}};
     var userId = Meteor.users.insert(user);
 
     var loginToken = Meteor.accounts._loginTokens.insert({userId: userId});
