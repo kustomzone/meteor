@@ -64,17 +64,19 @@ Undo previous changes made, such as by using `git checkout .` Reload
 the client, which will cause the browser to stop using the app cache.
 
 It's hard to see the `newClientAvailable` reactive variable when the
-client automatically reloads.  Remove the `reload` package so you can
+client automatically reloads.  Remove the `hot-code-push` package so you can
 see the variable without having the client also reload.
 
-    $ meteor remove standard-app-packages
-    $ meteor add meteor webapp logging deps session livedata
-    $ meteor add mongo-livedata templating handlebars check underscore
-    $ meteor add jquery random ejson autoupdate spacebars
+    $ meteor remove meteor-base
+    $ meteor add meteor webapp ddp autoupdate
 
 Add to leaderboard.js:
 
-    Template.leaderboard.helpers({available: Autoupdate.newClientAvailable});
+    Template.leaderboard.helpers({
+      available: function () {
+        return Autoupdate.newClientAvailable().toString();
+      }
+    });
 
 And add `{{available}}` to the leaderboard template in
 leaderboard.html.

@@ -54,6 +54,10 @@ Meteor.methods({
     capturedLogins[this.connection.id] = [];
   },
 
+  testCaptureLogouts: function() {
+    capturedLogouts = [];
+  },
+
   testFetchCapturedLogins: function () {
     if (capturedLogins[this.connection.id]) {
       var logins = capturedLogins[this.connection.id];
@@ -62,10 +66,17 @@ Meteor.methods({
     }
     else
       return [];
+  },
+
+  testFetchCapturedLogouts: function() {
+    return capturedLogouts;
   }
 });
 
 Accounts.onLogin(function (attempt) {
+  if (!attempt.connection) // if login method called from the server
+    return;
+
   if (capturedLogins[attempt.connection.id])
     capturedLogins[attempt.connection.id].push({
       successful: true,
@@ -74,12 +85,23 @@ Accounts.onLogin(function (attempt) {
 });
 
 Accounts.onLoginFailure(function (attempt) {
+  if (!attempt.connection) // if login method called from the server
+    return;
+
   if (capturedLogins[attempt.connection.id]) {
     capturedLogins[attempt.connection.id].push({
       successful: false,
       attempt: _.omit(attempt, 'connection')
     });
   }
+});
+
+var capturedLogouts = [];
+
+Accounts.onLogout(function() {
+  capturedLogouts.push({
+    successful: true
+  });
 });
 
 // Because this is global state that affects every client, we can't turn

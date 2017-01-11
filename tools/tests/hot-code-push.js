@@ -1,10 +1,6 @@
-var selftest = require('../selftest.js');
+var selftest = require('../tool-testing/selftest.js');
 var Sandbox = selftest.Sandbox;
-var utils = require('../utils.js');
-var Future = require('fibers/future');
-var net = require('net');
-var _ = require('underscore');
-var files = require('../files.js');
+var utils = require('../utils/utils.js');
 
 selftest.define("css hot code push", function (options) {
   var s = new Sandbox({
@@ -38,6 +34,7 @@ selftest.define("css hot code push", function (options) {
 
     // The server does NOT restart if a new css file is added.
     s.write("test.css", "body { background-color: red; }");
+    run.waitSecs(30);
     run.match("Client modified -- refreshing");
     run.match("numCssChanges: 1");
     run.match(/background-color: (red|rgb\(255, 0, 0\))/);
@@ -53,8 +50,10 @@ selftest.define("css hot code push", function (options) {
     run.match("numCssChanges: 3");
     run.match(/background-color: (transparent|rgba\(0, 0, 0, 0\))/);
 
-    s.write(".meteor/packages", "standard-app-packages \n my-package");
-    run.match("added my-package");
+    s.write(".meteor/packages", `meteor-base
+jquery
+my-package`);
+    run.match(/my-package.*added,/);
     run.match("client connected");
     run.match("numCssChanges: 0");
 
@@ -63,8 +62,11 @@ selftest.define("css hot code push", function (options) {
     run.match(/background-color: (blue|rgb\(0, 0, 255\))/);
 
     // Add appcache and ensure that the browser still reloads.
-    s.write(".meteor/packages", "standard-app-packages \n my-package \n appcache");
-    run.match("added appcache");
+    s.write(".meteor/packages", `meteor-base
+jquery
+my-package
+appcache`);
+    run.match(/appcache.*added,/);
     run.match("server restarted");
     run.match("numCssChanges: 0");
     run.match(/background-color: (blue|rgb\(0, 0, 255\))/);
@@ -79,8 +81,9 @@ selftest.define("css hot code push", function (options) {
     // like there's a race and we see a weird state
     utils.sleepMs(10000);
 
-    s.write(".meteor/packages", "standard-app-packages");
-    run.match("removed my-package");
+    s.write(".meteor/packages", `meteor-base
+jquery`);
+    run.match(/my-package.*removed from your project/);
     run.match("numCssChanges: 0");
     run.match(/background-color: (transparent|rgba\(0, 0, 0, 0\))/);
 
@@ -113,7 +116,7 @@ selftest.define("versioning hot code push", function (options) {
   });
 });
 
-selftest.define("javascript hot code push", function (options) {
+selftest.define("javascript hot code push", ["slow"], function (options) {
   var s = new Sandbox({
     clients: options.clients
   });
@@ -185,7 +188,7 @@ selftest.define("javascript hot code push", function (options) {
     // important part of this test.)
     s.write("hot-code-push-test.html", ">");
     run.match("Errors prevented startup");
-    run.match("bad formatting in HTML template");
+    run.match("Expected one of: <body>, <head>, <template>");
     // Fix it. It should notice, and restart. The client will restart too.
     s.write("hot-code-push-test.html", "");
     run.match("server restarted");
@@ -196,37 +199,38 @@ selftest.define("javascript hot code push", function (options) {
     run.match("client connected: 1");
     run.match("jsVar: undefined");
 
-    s.write(".meteor/packages", "standard-app-packages \n my-package");
-    run.match("added my-package");
+    s.write(".meteor/packages", `meteor-base
+session
+my-package`);
+    run.match(/my-package.*added,/);
     run.match("server restarted");
     run.match("client connected: 0");
     run.match("jsVar: undefined");
     run.match("packageVar: foo");
 
     s.write("packages/my-package/foo.js", "packageVar = 'bar'");
-    run.match("client connected: 1");
+    run.match("client connected: 0");
     run.match("jsVar: undefined");
     run.match("packageVar: bar");
 
     // Add appcache and ensure that the browser still reloads.
-    s.write(".meteor/packages", "standard-app-packages \n appcache");
-    run.match("added appcache");
+    s.write(".meteor/packages", `meteor-base
+session
+appcache`);
+    run.match(/appcache.*added,/);
     run.match("server restarted");
     run.match("client connected: 0");
     run.match("jsVar: undefined");
 
-    // XXX: Remove me.  This shouldn't be needed, but sometimes
-    // if we run too quickly on fast (or Linux?) machines, it looks
-    // like there's a race and we see a weird state
-    utils.sleepMs(10000);
-
     s.write("client/test.js", "jsVar = 'bar'");
+    run.waitSecs(20);
     run.match("client connected: 1");
     run.match("jsVar: bar");
 
     // Remove appcache and ensure that the browser still reloads.
-    s.write(".meteor/packages", "standard-app-packages");
-    run.match("removed appcache");
+    s.write(".meteor/packages", `meteor-base
+session`);
+    run.match(/appcache.*removed from your project/);
     run.match("server restarted");
     run.match("client connected: 0");
 

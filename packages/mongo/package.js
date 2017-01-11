@@ -9,22 +9,33 @@
 
 Package.describe({
   summary: "Adaptor for using MongoDB and Minimongo over DDP",
-  version: '1.0.8'
+  version: '1.1.14'
 });
 
 Npm.depends({
-  mongodb: "https://github.com/meteor/node-mongodb-native/tarball/cbd6220ee17c3178d20672b4a1df80f82f97d4c1"
+  "mongodb-uri": "0.9.7"
 });
 
 Npm.strip({
   mongodb: ["test/"]
 });
 
-Package.on_use(function (api) {
-  api.use(['random', 'ejson', 'json', 'underscore', 'minimongo', 'logging',
-           'ddp', 'tracker', 'application-configuration'],
-          ['client', 'server']);
-  api.use('check', ['client', 'server']);
+Package.onUse(function (api) {
+  api.use('npm-mongo', 'server');
+  api.use('allow-deny');
+
+  api.use([
+    'random',
+    'ejson',
+    'underscore',
+    'minimongo',
+    'ddp',
+    'tracker',
+    'diff-sequence',
+    'mongo-id',
+    'check',
+    'ecmascript'
+  ]);
 
   // Binary Heap data structure is used to optimize oplog observe driver
   // performance.
@@ -56,26 +67,28 @@ Package.on_use(function (api) {
   api.export('MongoTest', 'server', {testOnly: true});
   api.export("Mongo");
 
-  api.add_files(['mongo_driver.js', 'oplog_tailing.js',
+  api.addFiles(['mongo_driver.js', 'oplog_tailing.js',
                  'observe_multiplex.js', 'doc_fetcher.js',
                  'polling_observe_driver.js','oplog_observe_driver.js'],
                 'server');
-  api.add_files('local_collection_driver.js', ['client', 'server']);
-  api.add_files('remote_collection_driver.js', 'server');
-  api.add_files('collection.js', ['client', 'server']);
+  api.addFiles('local_collection_driver.js', ['client', 'server']);
+  api.addFiles('remote_collection_driver.js', 'server');
+  api.addFiles('collection.js', ['client', 'server']);
+  api.addFiles('connection_options.js', 'server');
 });
 
-Package.on_test(function (api) {
+Package.onTest(function (api) {
   api.use('mongo');
   api.use('check');
   api.use(['tinytest', 'underscore', 'test-helpers', 'ejson', 'random',
            'ddp', 'base64']);
   // XXX test order dependency: the allow_tests "partial allow" test
   // fails if it is run before mongo_livedata_tests.
-  api.add_files('mongo_livedata_tests.js', ['client', 'server']);
-  api.add_files('allow_tests.js', ['client', 'server']);
-  api.add_files('collection_tests.js', ['client', 'server']);
-  api.add_files('observe_changes_tests.js', ['client', 'server']);
-  api.add_files('oplog_tests.js', 'server');
-  api.add_files('doc_fetcher_tests.js', 'server');
+  api.addFiles('mongo_livedata_tests.js', ['client', 'server']);
+  api.addFiles('upsert_compatibility_test.js', 'server');
+  api.addFiles('allow_tests.js', ['client', 'server']);
+  api.addFiles('collection_tests.js', ['client', 'server']);
+  api.addFiles('observe_changes_tests.js', ['client', 'server']);
+  api.addFiles('oplog_tests.js', 'server');
+  api.addFiles('doc_fetcher_tests.js', 'server');
 });

@@ -1,15 +1,17 @@
 Package.describe({
   summary: 'GeoJSON utility functions (from https://github.com/maxogden/geojson-js-utils)',
-  version: '1.0.1'
+  version: '1.0.10'
 });
 
-Package.on_use(function (api) {
+Package.onUse(function (api) {
+  api.use('modules');
   api.export('GeoJSON');
-  api.add_files(['pre.js', 'geojson-utils.js', 'post.js']);
+  api.mainModule('main.js');
 });
 
-Package.on_test(function (api) {
+Package.onTest(function (api) {
   api.use('tinytest');
+  api.use('underscore');
   api.use('geojson-utils');
-  api.add_files(['geojson-utils.tests.js'], 'client');
+  api.addFiles(['geojson-utils.tests.js'], 'client');
 });

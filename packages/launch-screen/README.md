@@ -21,6 +21,8 @@ elements to be loaded before releasing the launch screen and showing
 the user the actual app.
 
 ### Additional waiting before releasing the launch screen
+[Source code of released version](https://github.com/meteor/meteor/tree/master/packages/launch-screen) | [Source code of development version](https://github.com/meteor/meteor/tree/devel/packages/launch-screen)
+***
 
 To wait on more events before releasing the launch screen, call `var handle =
 LaunchScreen.hold()` in the top-level of the client code of your app, and when
@@ -32,9 +34,9 @@ For example, to wait for a template to be rendered:
 // in a client-only javascript file
 var handle = LaunchScreen.hold();
 
-Template.myUI.rendered = function () {
+Template.myUI.onRendered(function () {
   handle.release();
-};
+});
 ```
 
 Your app, or packages used in your app, can call `LaunchScreen.hold()`

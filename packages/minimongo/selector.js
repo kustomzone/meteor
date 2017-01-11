@@ -255,15 +255,13 @@ var operatorBranchedMatcher = function (valueSelector, matcher, isRoot) {
 
   var operatorMatchers = [];
   _.each(valueSelector, function (operand, operator) {
-    // XXX we should actually implement $eq, which is new in 2.6
     var simpleRange = _.contains(['$lt', '$lte', '$gt', '$gte'], operator) &&
       _.isNumber(operand);
-    var simpleInequality = operator === '$ne' && !_.isObject(operand);
+    var simpleEquality = _.contains(['$ne', '$eq'], operator) && !_.isObject(operand);
     var simpleInclusion = _.contains(['$in', '$nin'], operator) &&
       _.isArray(operand) && !_.any(operand, _.isObject);
 
-    if (! (operator === '$eq' || simpleRange ||
-           simpleInclusion || simpleInequality)) {
+    if (! (simpleRange || simpleInclusion || simpleEquality)) {
       matcher._isSimple = false;
     }
 
@@ -380,6 +378,10 @@ var invertBranchedMatcher = function (branchedMatcher) {
 // "match each branched value independently and combine with
 // convertElementMatcherToBranchedMatcher".
 var VALUE_OPERATORS = {
+  $eq: function (operand) {
+    return convertElementMatcherToBranchedMatcher(
+      equalityElementMatcher(operand));
+  },
   $not: function (operand, valueSelector, matcher) {
     return invertBranchedMatcher(compileValueSelector(operand, matcher));
   },
@@ -681,7 +683,7 @@ ELEMENT_OPERATORS = {
         throw Error("$elemMatch need an object");
 
       var subMatcher, isDocMatcher;
-      if (isOperatorObject(operand, true)) {
+      if (isOperatorObject(_.omit(operand, _.keys(LOGICAL_OPERATORS)), true)) {
         subMatcher = compileValueSelector(operand, matcher);
         isDocMatcher = false;
       } else {
@@ -785,7 +787,7 @@ makeLookupFunction = function (key, options) {
     lookupRest = makeLookupFunction(parts.slice(1).join('.'));
   }
 
-  var elideUnnecessaryFields = function (retVal) {
+  var omitUnnecessaryFields = function (retVal) {
     if (!retVal.dontIterate)
       delete retVal.dontIterate;
     if (retVal.arrayIndices && !retVal.arrayIndices.length)
@@ -828,7 +830,7 @@ makeLookupFunction = function (key, options) {
     // selectors to iterate over it.  eg, {'a.0': 5} does not match {a: [[5]]}.
     // So in that case, we mark the return value as "don't iterate".
     if (!lookupRest) {
-      return [elideUnnecessaryFields({
+      return [omitUnnecessaryFields({
         value: firstLevel,
         dontIterate: isArray(doc) && isArray(firstLevel),
         arrayIndices: arrayIndices})];
@@ -843,7 +845,7 @@ makeLookupFunction = function (key, options) {
     if (!isIndexable(firstLevel)) {
       if (isArray(doc))
         return [];
-      return [elideUnnecessaryFields({value: undefined,
+      return [omitUnnecessaryFields({value: undefined,
                                       arrayIndices: arrayIndices})];
     }
 
@@ -990,7 +992,7 @@ LocalCollection._f = {
       return 9;
     if (EJSON.isBinary(v))
       return 5;
-    if (v instanceof LocalCollection._ObjectID)
+    if (v instanceof MongoID.ObjectID)
       return 7;
     return 3; // object
 

@@ -1,30 +1,30 @@
-var path = require('path');
-var fs = require('fs');
+require('../../tool-env/install-babel.js');
+
 var _ = require('underscore');
 var assert = require('assert');
 var crypto = require('crypto');
 var Fiber = require('fibers');
 var Future = require('fibers/future');
-var watch = require(path.join(__dirname, '..', '..', 'watch.js'));
-var files = require(path.join(__dirname, '..', '..', 'files.js'));
+var watch = require('../../fs/watch.js');
+var files = require('../../fs/files.js');
 
 var tmp = files.mkdtemp('test_watch');
 var serial = 0;
 
 var touchFile = function (filePath, contents) {
-  filePath = path.join(tmp, filePath);
-  files.mkdir_p(path.dirname(filePath));
-  fs.writeFileSync(filePath, contents || ('' + serial));
+  filePath = files.pathJoin(tmp, filePath);
+  files.mkdir_p(files.pathDirname(filePath));
+  files.writeFile(filePath, contents || ('' + serial));
   serial++;
 };
 
 var touchDir = function (dirPath) {
-  dirPath = path.join(tmp, dirPath);
+  dirPath = files.pathJoin(tmp, dirPath);
   files.mkdir_p(dirPath);
 };
 
 var remove = function (fileOrDirPath) {
-  fileOrDirPath = path.join(tmp, fileOrDirPath);
+  fileOrDirPath = files.pathJoin(tmp, fileOrDirPath);
   files.rm_recursive(fileOrDirPath);
 };
 
@@ -44,11 +44,11 @@ var go = function (options) {
   var watchSet = new watch.WatchSet();
 
   _.each(options.files, function (value, file) {
-    file = path.join(tmp, file);
+    file = files.pathJoin(tmp, file);
     if (value !== null && typeof value !== "string") {
-      if (fs.existsSync(file)) {
+      if (files.exists(file)) {
         var hash = crypto.createHash('sha1');
-        hash.update(fs.readFileSync(file));
+        hash.update(files.readFile(file));
         value = hash.digest('hex');
       } else {
         value = 'dummyhash';
@@ -61,9 +61,10 @@ var go = function (options) {
     // don't mutate options.directories, since we may reuse it with a no-arg
     // go() call
     var realDir = {
-      absPath: path.join(tmp, dir.absPath),
+      absPath: files.pathJoin(tmp, dir.absPath),
       include: dir.include,
-      exclude: dir.exclude
+      exclude: dir.exclude,
+      names: dir.names
     };
     realDir.contents = dir.contents || watch.readDirectory(realDir);
     watchSet.addDirectory(realDir);
@@ -259,6 +260,21 @@ Fiber(function () {
   });
   assert(!fires());
   touchFile('/aa/bla');
+  assert(fires());
+
+  touchDir('/cc');
+  go({
+    directories: [
+      {absPath: '/cc',
+       names: ['abc-foo', 'def-bar'],
+       exclude: [/foo/],
+       contents: []
+      }
+    ]
+  });
+  assert(!fires());
+  touchFile('/cc/abc-foo');
+  // See that names overrides exclude.
   assert(fires());
 
   // nb: these are supposed to verify that the "wait a second and try again"

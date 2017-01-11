@@ -2,22 +2,18 @@ Facebook = {};
 
 var querystring = Npm.require('querystring');
 
-
-OAuth.registerService('facebook', 2, null, function(query) {
-
-  var response = getTokenResponse(query);
-  var accessToken = response.accessToken;
-  var identity = getIdentity(accessToken);
-
-  var serviceData = {
-    accessToken: accessToken,
-    expiresAt: (+new Date) + (1000 * response.expiresIn)
-  };
-
+Facebook.handleAuthFromAccessToken = function handleAuthFromAccessToken(accessToken, expiresAt) {
   // include all fields from facebook
   // http://developers.facebook.com/docs/reference/login/public-profile-and-friend-list/
   var whitelisted = ['id', 'email', 'name', 'first_name',
-      'last_name', 'link', 'username', 'gender', 'locale', 'age_range'];
+      'last_name', 'link', 'gender', 'locale', 'age_range'];
+
+  var identity = getIdentity(accessToken, whitelisted);
+
+  var serviceData = {
+    accessToken: accessToken,
+    expiresAt: expiresAt
+  };
 
   var fields = _.pick(identity, whitelisted);
   _.extend(serviceData, fields);
@@ -26,6 +22,14 @@ OAuth.registerService('facebook', 2, null, function(query) {
     serviceData: serviceData,
     options: {profile: {name: identity.name}}
   };
+};
+
+OAuth.registerService('facebook', 2, null, function(query) {
+  var response = getTokenResponse(query);
+  var accessToken = response.accessToken;
+  var expiresIn = response.expiresIn;
+
+  return Facebook.handleAuthFromAccessToken(accessToken, (+new Date) + (1000 * expiresIn));
 });
 
 // checks whether a string parses as JSON
@@ -50,7 +54,7 @@ var getTokenResponse = function (query) {
   try {
     // Request an access token
     responseContent = HTTP.get(
-      "https://graph.facebook.com/oauth/access_token", {
+      "https://graph.facebook.com/v2.2/oauth/access_token", {
         params: {
           client_id: config.appId,
           redirect_uri: OAuth._redirectUri('facebook', config),
@@ -85,10 +89,14 @@ var getTokenResponse = function (query) {
   };
 };
 
-var getIdentity = function (accessToken) {
+var getIdentity = function (accessToken, fields) {
   try {
-    return HTTP.get("https://graph.facebook.com/me", {
-      params: {access_token: accessToken}}).data;
+    return HTTP.get("https://graph.facebook.com/v2.4/me", {
+      params: {
+        access_token: accessToken,
+        fields: fields
+      }
+    }).data;
   } catch (err) {
     throw _.extend(new Error("Failed to fetch identity from Facebook. " + err.message),
                    {response: err.response});

@@ -1,10 +1,11 @@
 Package.describe({
   summary: "Serves a Meteor app over HTTP",
-  version: '1.1.4'
+  version: '1.3.12'
 });
 
-Npm.depends({connect: "2.9.0",
-             send: "0.1.4",
+Npm.depends({connect: "2.30.2",
+             parseurl: "1.3.0",
+             send: "0.13.0",
              useragent: "2.0.7"});
 
 Npm.strip({
@@ -12,13 +13,18 @@ Npm.strip({
   useragent: ["test/"]
 });
 
-Package.on_use(function (api) {
+Cordova.depends({
+  'cordova-plugin-whitelist': '1.3.0',
+  'cordova-plugin-wkwebview-engine': '1.1.0',
+  'cordova-plugin-meteor-webapp': '1.4.1'
+});
+
+Package.onUse(function (api) {
+  api.use('ecmascript');
   api.use(['logging', 'underscore', 'routepolicy', 'boilerplate-generator',
-           'spacebars', 'htmljs', 'blaze', 'webapp-hashing'], 'server');
+           'webapp-hashing'], 'server');
   api.use(['underscore'], 'client');
-  api.use(['application-configuration', 'follower-livedata'], {
-    unordered: true
-  });
+
   // At response serving time, webapp uses browser-policy if it is loaded. If
   // browser-policy is loaded, then it must be loaded after webapp
   // (browser-policy depends on webapp). So we don't explicitly depend in any
@@ -26,11 +32,13 @@ Package.on_use(function (api) {
   // loaded after webapp.
   api.export(['WebApp', 'main', 'WebAppInternals'], 'server');
   api.export(['WebApp'], 'client');
-  api.add_files('webapp_server.js', 'server');
-  api.add_files('webapp_client.js', 'client');
+  api.addFiles('webapp_server.js', 'server');
+  api.addFiles('webapp_client.js', 'client');
+  api.addFiles('webapp_cordova.js', 'web.cordova');
 });
 
-Package.on_test(function (api) {
-  api.use(['tinytest', 'webapp', 'http']);
-  api.add_files('webapp_tests.js', 'server');
+Package.onTest(function (api) {
+  api.use(['tinytest', 'webapp', 'http', 'underscore']);
+  api.addFiles('webapp_tests.js', 'server');
+  api.addFiles('webapp_client_tests.js', 'client');
 });

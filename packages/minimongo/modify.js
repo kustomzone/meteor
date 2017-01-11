@@ -14,6 +14,10 @@ LocalCollection._modify = function (doc, mod, options) {
   options = options || {};
   if (!isPlainObject(mod))
     throw MinimongoError("Modifier must be an object");
+
+  // Make sure the caller can't mutate our data structures.
+  mod = EJSON.clone(mod);
+
   var isModifier = isOperatorObject(mod);
 
   var newDoc;
@@ -41,16 +45,22 @@ LocalCollection._modify = function (doc, mod, options) {
       if (!modFunc)
         throw MinimongoError("Invalid modifier specified " + op);
       _.each(operand, function (arg, keypath) {
-        // XXX mongo doesn't allow mod field names to end in a period,
-        // but I don't see why.. it allows '' as a key, as does JS
-        if (keypath.length && keypath[keypath.length-1] === '.')
-          throw MinimongoError(
-            "Invalid mod field name, may not end in a period");
+        if (keypath === '') {
+          throw MinimongoError("An empty update path is not valid.");
+        }
 
-        if (keypath === '_id')
+        if (keypath === '_id' && op !== '$setOnInsert') {
           throw MinimongoError("Mod on _id not allowed");
+        }
 
         var keyparts = keypath.split('.');
+
+        if (! _.all(keyparts, _.identity)) {
+          throw MinimongoError(
+            "The update path '" + keypath +
+              "' contains an empty field name, which is not allowed.");
+        }
+
         var noCreate = _.has(NO_CREATE_MODIFIERS, op);
         var forbidArray = (op === "$rename");
         var target = findModTarget(newDoc, keyparts, {
@@ -69,11 +79,7 @@ LocalCollection._modify = function (doc, mod, options) {
     // Note: this used to be for (var k in doc) however, this does not
     // work right in Opera. Deleting from a doc while iterating over it
     // would sometimes cause opera to skip some keys.
-
-    // isInsert: if we're constructing a document to insert (via upsert)
-    // and we're in replacement mode, not modify mode, DON'T take the
-    // _id from the query.  This matches mongo's behavior.
-    if (k !== '_id' || options.isInsert)
+    if (k !== '_id')
       delete doc[k];
   });
   _.each(newDoc, function (v, k) {
@@ -176,6 +182,46 @@ var NO_CREATE_MODIFIERS = {
 };
 
 var MODIFIERS = {
+  $currentDate: function (target, field, arg) {
+    if (typeof arg === "object" && arg.hasOwnProperty("$type")) {
+       if (arg.$type !== "date") {
+         throw MinimongoError("Minimongo does currently only support the date type in $currentDate modifiers");
+       }
+    } else if (arg !== true) {
+      throw MinimongoError("Invalid $currentDate modifier");
+    }
+    target[field] = new Date();
+  },
+  $min: function (target, field, arg) {
+    if (typeof arg !== "number") {
+      throw MinimongoError("Modifier $min allowed for numbers only");
+    }
+    if (field in target) {
+      if (typeof target[field] !== "number") {
+        throw MinimongoError("Cannot apply $min modifier to non-number");
+      }
+      if (target[field] > arg) {
+        target[field] = arg;
+      }
+    } else {
+      target[field] = arg;
+    }
+  },
+  $max: function (target, field, arg) {
+    if (typeof arg !== "number") {
+      throw MinimongoError("Modifier $max allowed for numbers only");
+    }
+    if (field in target) {
+      if (typeof target[field] !== "number") {
+        throw MinimongoError("Cannot apply $max modifier to non-number");
+      }
+      if (target[field] < arg) {
+         target[field] = arg;
+      }
+    } else {
+      target[field] = arg;
+    }
+  },
   $inc: function (target, field, arg) {
     if (typeof arg !== "number")
       throw MinimongoError("Modifier $inc allowed for numbers only");
@@ -198,7 +244,7 @@ var MODIFIERS = {
       e.setPropertyError = true;
       throw e;
     }
-    target[field] = EJSON.clone(arg);
+    target[field] = arg;
   },
   $setOnInsert: function (target, field, arg) {
     // converted to `$set` in `_modify`
@@ -220,14 +266,25 @@ var MODIFIERS = {
 
     if (!(arg && arg.$each)) {
       // Simple mode: not $each
-      target[field].push(EJSON.clone(arg));
+      target[field].push(arg);
       return;
     }
 
-    // Fancy mode: $each (and maybe $slice and $sort)
+    // Fancy mode: $each (and maybe $slice and $sort and $position)
     var toPush = arg.$each;
     if (!(toPush instanceof Array))
       throw MinimongoError("$each must be an array");
+
+    // Parse $position
+    var position = undefined;
+    if ('$position' in arg) {
+      if (typeof arg.$position !== "number")
+        throw MinimongoError("$position must be a numeric value");
+      // XXX should check to make sure integer
+      if (arg.$position < 0)
+        throw MinimongoError("$position in $push must be zero or positive");
+      position = arg.$position;
+    }
 
     // Parse $slice.
     var slice = undefined;
@@ -259,8 +316,15 @@ var MODIFIERS = {
     }
 
     // Actually push.
-    for (var j = 0; j < toPush.length; j++)
-      target[field].push(EJSON.clone(toPush[j]));
+    if (position === undefined) {
+      for (var j = 0; j < toPush.length; j++)
+        target[field].push(toPush[j]);
+    } else {
+      var spliceArguments = [position, 0];
+      for (var j = 0; j < toPush.length; j++)
+        spliceArguments.push(toPush[j]);
+      Array.prototype.splice.apply(target[field], spliceArguments);
+    }
 
     // Actually sort.
     if (sortFunction)
@@ -308,7 +372,7 @@ var MODIFIERS = {
         for (var i = 0; i < x.length; i++)
           if (LocalCollection._f._equal(value, x[i]))
             return;
-        x.push(EJSON.clone(value));
+        x.push(value);
       });
     }
   },
@@ -337,7 +401,7 @@ var MODIFIERS = {
       throw MinimongoError("Cannot apply $pull/pullAll modifier to non-array");
     else {
       var out = [];
-      if (typeof arg === "object" && !(arg instanceof Array)) {
+      if (arg != null && typeof arg === "object" && !(arg instanceof Array)) {
         // XXX would be much nicer to compile this once, rather than
         // for each document we modify.. but usually we're not
         // modifying that many documents, so we'll let it slide for

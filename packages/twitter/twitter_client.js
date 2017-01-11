@@ -1,5 +1,3 @@
-Twitter = {};
-
 // Request Twitter credentials for the user
 // @param options {optional}  XXX support options.requestPermissions
 // @param credentialRequestCompleteCallback {Function} Callback function to call on
@@ -29,13 +27,23 @@ Twitter.requestCredential = function (options, credentialRequestCompleteCallback
   // url to app, enters "step 1" as described in
   // packages/accounts-oauth1-helper/oauth1_server.js
   var loginPath = '_oauth/twitter/?requestTokenAndRedirect=true'
-        + '&state=' + OAuth._stateParam(loginStyle, credentialToken);
+        + '&state=' + OAuth._stateParam(loginStyle, credentialToken, options && options.redirectUrl);
 
   if (Meteor.isCordova) {
     loginPath = loginPath + "&cordova=true";
     if (/Android/i.test(navigator.userAgent)) {
       loginPath = loginPath + "&android=true";
     }
+  }
+
+  // Support additional, permitted parameters
+  if (options) {
+    var hasOwn = Object.prototype.hasOwnProperty;
+    Twitter.validParamsAuthenticate.forEach(function (param) {
+      if (hasOwn.call(options, param)) {
+        loginPath += "&" + param + "=" + encodeURIComponent(options[param]);
+      }
+    });
   }
 
   var loginUrl = Meteor.absoluteUrl(loginPath);

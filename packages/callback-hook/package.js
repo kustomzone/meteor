@@ -1,12 +1,18 @@
 Package.describe({
   summary: "Register callbacks on a hook",
-  version: '1.0.1'
+  version: '1.0.10'
 });
 
-Package.on_use(function (api) {
+Package.onUse(function (api) {
   api.use('underscore', ['client', 'server']);
 
   api.export('Hook');
 
-  api.add_files('hook.js', ['client', 'server']);
+  api.addFiles('hook.js', ['client', 'server']);
+});
+
+Package.onTest(function (api) {
+  api.use('callback-hook');
+  api.use('tinytest');
+  api.addFiles('hook_tests.js', 'server');
 });

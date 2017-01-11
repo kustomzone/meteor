@@ -1,17 +1,19 @@
 Package.describe({
   summary: "Random number generator and utilities",
-  version: '1.0.1'
+  version: '1.0.10'
 });
 
-Package.on_use(function (api) {
+Package.onUse(function (api) {
   api.use('underscore');
+  api.use('ecmascript');
   api.export('Random');
-  api.add_files('random.js');
-  api.add_files('deprecated.js');
+  api.addFiles('random.js');
+  api.addFiles('deprecated.js');
 });
 
-Package.on_test(function(api) {
+Package.onTest(function(api) {
   api.use('random');
+  api.use('ecmascript');
   api.use('tinytest');
-  api.add_files('random_tests.js', ['client', 'server']);
+  api.addFiles('random_tests.js', ['client', 'server']);
 });

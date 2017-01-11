@@ -1,17 +1,22 @@
-var selftest = require('../selftest.js');
-var Sandbox = selftest.Sandbox;
-var files = require('../files.js');
-var testUtils = require('../test-utils.js');
-var utils = require('../utils.js');
 var _= require('underscore');
-var fs = require("fs");
-var path = require("path");
-var packageClient = require("../package-client.js");
-var buildmessage = require("../buildmessage.js");
+
+var selftest = require('../tool-testing/selftest.js');
+var Sandbox = selftest.Sandbox;
+var files = require('../fs/files.js');
+var testUtils = require('../tool-testing/test-utils.js');
+var utils = require('../utils/utils.js');
+var packageClient = require('../packaging/package-client.js');
+var catalog = require('../packaging/catalog/catalog.js');
 
 var username = "test";
-var password = "testtest";
 
+// Returns a random package name.
+var randomizedPackageName = function (username, start) {
+  // We often use package names in long, wrapped string output, so having them
+  // be a consistent length is very useful.
+  var startStr = start ? start + "-" : "";
+  return username + ":" + startStr + utils.randomToken().substring(0, 6);
+}
 
 // Given a sandbox, that has the app as its currend cwd, read the packages file
 // and check that it contains exactly the packages specified, in order.
@@ -19,7 +24,7 @@ var password = "testtest";
 // sand: a sandbox, that has the main app directory as its cwd.
 // packages: an array of packages in order. Packages can be of the form:
 //
-//    meteor-platform (ie: name), in which case this will match any
+//    meteor-base (ie: name), in which case this will match any
 //    version of that package as long as it is included.
 //
 //    awesome-pack@1.0.0 (ie: name@version) to match that name at that
@@ -29,7 +34,9 @@ var checkPackages = selftest.markStack(function(sand, packages) {
   var lines = sand.read(".meteor/packages").split("\n");
   var i = 0;
   _.each(lines, function(line) {
-    if (!line) return;
+    if (!line) {
+      return;
+    }
     // If the specified package contains an @ sign, then it has a version
     // number, so we should match everything.
     if (packages[i].split('@').length > 1) {
@@ -51,7 +58,7 @@ var checkPackages = selftest.markStack(function(sand, packages) {
 // sand: a sandbox, that has the main app directory as its cwd.
 // packages: an array of packages in order. Packages can be of the form:
 //
-//    meteor-platform (ie: name), in which case this will match any
+//    meteor-base (ie: name), in which case this will match any
 //    version of that package as long as it is included. This is for packages
 //    external to the app, since we don't want this test to fail when we push a
 //    new version.
@@ -64,7 +71,9 @@ var checkVersions = selftest.markStack(function(sand, packages) {
   var lines = sand.read(".meteor/versions").split("\n");
   var depend = {};
   _.each(lines, function(line) {
-    if (!line) return;
+    if (!line) {
+      return;
+    }
     // Packages are stored of the form foo@1.0.0, so this should give us an
     // array [foo, 1.0.0].
     var split = line.split('@');
@@ -85,74 +94,6 @@ var checkVersions = selftest.markStack(function(sand, packages) {
   selftest.expectEqual(packages.length, i);
 });
 
-// Takes in a remote catalog. Returns an object that can sort of immitate the
-// catalog. We don't bother to copy all of the information for memory/efficiency
-// reasons; the new 'catalog' has the following methods, which correspond to the
-// same methods on the normal catalog.
-//
-//  getAllPackageNames () - list of package names
-//  getPackage (p) - given a package name, return its record
-//  getSortedVersions (p) - given a package name, return a sorted list of its versions
-//  getAllReleaseTracks () - list of release tracks
-//  getSortedRecommendedReleaseVersions (t) - given a track name, get (see method name)
-//  getReleaseVersion (t, v) - given track & version, return the document record
-var DataStub = function (remoteCatalog) {
-  var self = this;
-  selftest.doOrThrow(function () {
-    var packageNames = remoteCatalog.getAllPackageNames();
-    self.packages = {};
-    _.each(packageNames, function (p) {
-      var versions = remoteCatalog.getSortedVersions(p);
-      var record = remoteCatalog.getPackage(p);
-      self.packages[p] = { versions: versions, record: record };
-    });
-    var releaseTracks = remoteCatalog.getAllReleaseTracks();
-    self.releases = {};
-    _.each(releaseTracks, function (t) {
-      var versions =
-            remoteCatalog.getSortedRecommendedReleaseVersions(t);
-      var records = {};
-      _.each(versions, function (v) {
-        records[v] = remoteCatalog.getReleaseVersion(t, v);
-      });
-      self.releases[t] = { versions: versions, records: records };
-    });
-  });
-};
-
-_.extend(DataStub.prototype, {
-  getAllPackageNames: function () {
-    return _.keys(this.packages);
-  },
-  getSortedVersions: function (p) {
-    var self = this;
-    var rec = self.packages[p];
-    if (!rec) return null;
-    return rec.versions;
-  },
-  getPackage: function (p) {
-    var self = this;
-    var rec = self.packages[p];
-    if (!rec) return null;
-    return rec.record;
-  },
-  getAllReleaseTracks: function () {
-    return _.keys(this.releases);
-  },
-  getSortedRecommendedReleaseVersions: function (t) {
-    var self = this;
-    var rec = self.releases[t];
-    if (!rec) return null;
-    return rec.versions;
-  },
-  getReleaseVersion: function (t, v) {
-    var self = this;
-    var rec = self.releases[t];
-    if (!rec) return null;
-    return rec.records[v];
-  }
-});
-
 // Add packages to an app. Change the contents of the packages and their
 // dependencies, make sure that the app still refreshes.
 selftest.define("change packages during hot code push", [], function () {
@@ -162,7 +103,6 @@ selftest.define("change packages during hot code push", [], function () {
   // Starting a run
   s.createApp("myapp", "package-tests");
   s.cd("myapp");
-  s.set("METEOR_TEST_TMP", files.mkdtemp());
   run = s.run();
   run.waitSecs(5);
   run.match("myapp");
@@ -174,24 +114,21 @@ selftest.define("change packages during hot code push", [], function () {
   run.match("running at");
   run.match("localhost");
   // Add the local package 'say-something'. It should print a message.
-  s.write(".meteor/packages", "meteor-platform \n say-something");
+  s.write(".meteor/packages", "meteor-base \n say-something");
   run.waitSecs(3);
   run.match("initial");
-  run.match("restarted");
 
-  // Modify the local package 'say'something'.
+  // Modify the local package 'say-something'.
   s.cd("packages/say-something", function () {
     s.write("foo.js", "console.log(\"another\");");
   });
   run.waitSecs(12);
   run.match("another");
-  run.match("restarted");
 
   // Add a local package depends-on-plugin.
-  s.write(".meteor/packages", "meteor-platform \n depends-on-plugin");
+  s.write(".meteor/packages", "meteor-base \n depends-on-plugin");
   run.waitSecs(2);
   run.match("foobar");
-  run.match("restarted");
 
   // Change something in the plugin.
   s.cd("packages/contains-plugin/plugin", function () {
@@ -200,39 +137,20 @@ selftest.define("change packages during hot code push", [], function () {
   run.waitSecs(2);
   run.match("edit");
   run.match("foobar!");
-  run.match("restarted");
-
-  // In a local package, add a dependency on a different package.  In this case,
-  // package2.js contains an onUse call that tells it to use accounts-base (a
-  // core package that is not already included in the app)
-  s.cp('packages/contains-plugin/package2.js',
-         'packages/contains-plugin/package.js');
-  run.waitSecs(2);
-  run.match("edit");
-  run.match("foobar!");
-  run.match("restarted");
 
   // Check that we are watching the versions file, as well as the packages file.
   s.unlink('.meteor/versions');
   run.waitSecs(10);
   run.match("restarted");
 
-  // Add packages to sub-programs of an app. Make sure that the correct change
-  // is propagated to its versions file.
-  s.cp('programs/empty/package2.js', 'programs/empty/package.js');
-
-  run.waitSecs(2);
-  run.match("restarted");
-
   // Switch back to say-something for a moment.
-  s.write(".meteor/packages", "meteor-platform \n say-something");
+  s.write(".meteor/packages", "meteor-base \n say-something");
   run.waitSecs(3);
   run.match("another");
-  run.match("restarted");
   run.stop();
 
   s.rename('packages/say-something', 'packages/shout-something');
-  s.write(".meteor/packages", "meteor-platform \n shout-something");
+  s.write(".meteor/packages", "meteor-base \n shout-something");
   s.cd("packages/shout-something", function () {
     s.write("foo.js", "console.log(\"louder\");");
   });
@@ -244,10 +162,6 @@ selftest.define("change packages during hot code push", [], function () {
   run.match("MongoDB");
   run.waitSecs(5);
   run.match("louder");  // the package actually loaded
-  run.match("your app");
-  run.waitSecs(5);
-  run.match("running at");
-  run.match("localhost");
 
   // How about breaking and fixing a package.js?
   s.cd("packages/shout-something", function () {
@@ -255,7 +169,7 @@ selftest.define("change packages during hot code push", [], function () {
     s.write("package.js", "]");
     run.waitSecs(3);
     run.match("=> Errors prevented startup");
-    run.match("package.js:1:1: Unexpected token ]");
+    run.match("package.js:1: Unexpected token");
     run.match("Waiting for file change");
 
     s.write("package.js", packageJs);
@@ -267,24 +181,29 @@ selftest.define("change packages during hot code push", [], function () {
 });
 
 // Add packages through the command line. Make sure that the correct set of
-// changes is reflected in .meteor/packages, .meteor/versions and list. Make
-// sure that debugOnly packages don't show up in production mode.
-selftest.define("add packages to app", ["net"], function () {
+// changes is reflected in .meteor/packages, .meteor/versions and list.
+selftest.define("add packages to app", [], function () {
   var s = new Sandbox();
   var run;
 
   // Starting a run
   s.createApp("myapp", "package-tests");
   s.cd("myapp");
-  s.set("METEOR_TEST_TMP", files.mkdtemp());
   s.set("METEOR_OFFLINE_CATALOG", "t");
 
-  // This is a legit version, but accounts-base started with 1.0.0 and is
+  // This has legit version syntax, but accounts-base started with 1.0.0 and is
   // unlikely to backtrack.
   run = s.run("add", "accounts-base@0.123.123");
   run.matchErr("no such version");
   run.expectExit(1);
 
+  // Adding a nonexistent package at a nonexistent version should print
+  // only one error message, not two. (We used to print "no such
+  // package" and "no such version".)
+  run = s.run("add", "not-a-real-package-and-never-will-be@1.0.0");
+  run.matchErr("no such package");
+  run.expectExit(1);
+  run.forbidAll("no such version");
 
   run = s.run("add", "accounts-base");
 
@@ -292,7 +211,16 @@ selftest.define("add packages to app", ["net"], function () {
   run.expectExit(0);
 
   checkPackages(s,
-                ["meteor-platform", "accounts-base"]);
+                ["meteor-base", "accounts-base"]);
+
+  // Adding the nonexistent version now should still say "no such
+  // version". Regression test for
+  // https://github.com/meteor/meteor/issues/2898.
+  run = s.run("add", "accounts-base@0.123.123");
+  run.matchErr("no such version");
+  run.expectExit(1);
+  run.forbidAll("Currently using accounts-base");
+  run.forbidAll("will be changed to");
 
   run = s.run("--once");
 
@@ -301,55 +229,39 @@ selftest.define("add packages to app", ["net"], function () {
   run.expectExit(0);
 
   checkPackages(s,
-                ["meteor-platform", "accounts-base",  "say-something@1.0.0"]);
+                ["meteor-base", "accounts-base",  "say-something@1.0.0"]);
 
   run = s.run("add", "depends-on-plugin");
-  run.match(" added");
-  run.match("depends-on-plugin");
+  run.match(/depends-on-plugin.*added,/);
   run.expectExit(0);
 
   checkPackages(s,
-                ["meteor-platform", "accounts-base",
+                ["meteor-base", "accounts-base",
                  "say-something@1.0.0", "depends-on-plugin"]);
 
   checkVersions(s,
                 ["accounts-base",  "depends-on-plugin",
-                 "say-something",  "meteor-platform",
+                 "say-something",  "meteor-base",
                  "contains-plugin@1.1.0"]);
 
   run = s.run("remove", "say-something");
   run.match("say-something: removed dependency");
   checkVersions(s,
                 ["accounts-base",  "depends-on-plugin",
-                 "meteor-platform",
+                 "meteor-base",
                  "contains-plugin"]);
 
   run = s.run("remove", "depends-on-plugin");
-  run.match("removed contains-plugin");
-  run.match("removed depends-on-plugin");
+  run.match(/contains-plugin.*removed from your project/);
+  run.match(/depends-on-plugin.*removed from your project/);
   run.match("depends-on-plugin: removed dependency");
 
   checkVersions(s,
                 ["accounts-base",
-                 "meteor-platform"]);
+                 "meteor-base"]);
   run = s.run("list");
   run.match("accounts-base");
-  run.match("meteor-platform");
-
-  // Add packages to sub-programs of an app. Make sure that the correct change
-  // is propagated to its versions file.
-  s.cp('programs/empty/package2.js', 'programs/empty/package.js');
-
-  // Don't add the file to packages.
-  run = s.run("list");
-  run.match("accounts-base");
-  run.match("meteor-platform");
-
-  // Do add the file to versions.
-  checkVersions(s,
-                ["accounts-base",  "depends-on-plugin",
-                 "meteor-platform",
-                 "contains-plugin"]);
+  run.match("meteor-base");
 
   // Add a description-less package. Check that no weird things get
   // printed (like "added no-description: undefined").
@@ -357,15 +269,25 @@ selftest.define("add packages to app", ["net"], function () {
   run.match("no-description\n");
   run.expectEnd();
   run.expectExit(0);
+});
 
-  // Add a debugOnly package. It should work during a normal run, but print
+selftest.define("add debugOnly and prodOnly packages", [], function () {
+  var s = new Sandbox();
+  var run;
+
+  // Starting a run
+  s.createApp("myapp", "package-tests");
+  s.cd("myapp");
+  s.set("METEOR_OFFLINE_CATALOG", "t");
+
+    // Add a debugOnly package. It should work during a normal run, but print
   // nothing in production mode.
   run = s.run("add", "debug-only");
   run.match("debug-only");
   run.expectExit(0);
 
   s.mkdir("server");
-  s.write("server/debug.js",
+  s.write("server/exit-test.js",
           "process.exit(global.DEBUG_ONLY_LOADED ? 234 : 235)");
 
   run = s.run("--once");
@@ -375,7 +297,38 @@ selftest.define("add packages to app", ["net"], function () {
   run = s.run("--once", "--production");
   run.waitSecs(15);
   run.expectExit(235);
+
+  // Add prod-only package, which sets GLOBAL.PROD_ONLY_LOADED.
+  run = s.run("add", "prod-only");
+  run.match("prod-only");
+  run.expectExit(0);
+
+  s.mkdir("server");
+  s.write("server/exit-test.js", // overwrite
+          "process.exit(global.PROD_ONLY_LOADED ? 234 : 235)");
+
+  run = s.run("--once");
+  run.waitSecs(15);
+  run.expectExit(235);
+
+  run = s.run("--once", "--production");
+  run.waitSecs(15);
+  run.expectExit(234);
 });
+
+selftest.define("add package with both debugOnly and prodOnly", [], function () {
+  var s = new Sandbox();
+  var run;
+
+  // Add an app with a package with prodOnly and debugOnly set (an error)
+  s.createApp("myapp", "debug-only-test", {dontPrepareApp: true});
+  s.cd("myapp");
+  run = s.run("--prepare-app");
+  run.waitSecs(20);
+  run.matchErr("can't have more than one of: debugOnly, prodOnly, testOnly");
+  run.expectExit(1);
+});
+
 
 // Add a package that adds files to specific client architectures.
 selftest.define("add packages client archs", function (options) {
@@ -387,14 +340,12 @@ selftest.define("add packages client archs", function (options) {
     // Starting a run
     s.createApp("myapp", "package-tests");
     s.cd("myapp");
-    s.set("METEOR_TEST_TMP", files.mkdtemp());
-    s.set("METEOR_OFFLINE_CATALOG", "t");
+      s.set("METEOR_OFFLINE_CATALOG", "t");
 
     var outerRun = s.run("add", "say-something-client-targets");
-    outerRun.match("added");
+    outerRun.match(/say-something-client-targets.*added,/);
     outerRun.expectExit(0);
-    checkPackages(s,
-                  ["meteor-platform", "say-something-client-targets"]);
+    checkPackages(s, ["meteor-base", "say-something-client-targets"]);
 
     var expectedLogNum = 0;
     s.testWithAllClients(function (run) {
@@ -418,509 +369,46 @@ selftest.define("add packages client archs", function (options) {
   runTestWithArgs("browser", [], 3000);
 });
 
-// Removes the local data.json file from disk.
-var cleanLocalCache = function () {
-  var config = require("../config.js");
-  var storage =  config.getPackageStorage();
-  if (fs.existsSync(storage)) {
-    fs.unlinkSync(storage);
-  }
-};
-
-var publishMostBasicPackage = selftest.markStack(function (s, fullPackageName) {
-  var run = s.run("create", "--package", fullPackageName);
-  run.waitSecs(15);
-  run.expectExit(0);
-  run.match(fullPackageName);
-
-  s.cd(fullPackageName, function () {
-    run = s.run("publish", "--create");
-    run.waitSecs(60);
-    run.expectExit(0);
-    run.match("Done");
-  });
-});
-
-var publishReleaseInNewTrack = selftest.markStack(function (s, releaseTrack, tool, packages) {
-  var relConf = {
-    track: releaseTrack,
-    version: "0.9",
-    recommended: "true",
-    description: "a test release",
-    tool: tool + "@1.0.0",
-    packages: packages
-  };
-  s.write("release.json", JSON.stringify(relConf, null, 2));
-  var run = s.run("publish-release", "release.json", "--create-track");
-  run.waitSecs(15);
-  run.match("Done");
-  run.expectExit(0);
-});
-
-// Add packages through the command line, and make sure that the correct set of
-// changes is reflected in .meteor/packages, .meteor/versions and list
-selftest.define("sync local catalog", ["slow", "net", "test-package-server"],  function () {
-  selftest.fail("this test is broken and breaks other tests by deleting their catalog.");
-  return;
-
-
-  var s = new Sandbox();
-  var run;
-
-  s.set("METEOR_TEST_TMP", files.mkdtemp());
-  testUtils.login(s, username, password);
-  var packageName = utils.randomToken();
-  var fullPackageName = username + ":" + packageName + "-a";
-  var releaseTrack = username + ":TEST-" + utils.randomToken().toUpperCase();
-
-  // First test -- pretend that the user has downloaded meteor for the purpose
-  // of running a package or an app. Create a package. Clean out the
-  // data.json, then try to do things with them.
-
-  publishMostBasicPackage(s, fullPackageName);
-
-  // Publish a release.  This release is super-fake: the tool is a package that
-  // is not actually a tool, for example. That's OK for our purposes for now,
-  // because we only care about the tool version if we run an app from it.
-  var packages = {};
-  packages[fullPackageName] = "1.0.0";
-  publishReleaseInNewTrack(s, releaseTrack, fullPackageName /*tool*/, packages);
-
-  // Create a package that has a versionsFrom for the just-published release.
-  var newPack = username + ":" + packageName + "-b";
-  s.createPackage(newPack, "package-of-two-versions");
-  s.cd(newPack, function() {
-    var packOpen = s.read("package.js");
-    packOpen = packOpen + "\nPackage.onUse(function(api) { \n" +
-      "api.versionsFrom(\"" + releaseTrack + "@0.9\");\n" +
-      "api.use(\"" + fullPackageName + "\"); });";
-    s.write("package.js", packOpen);
-  });
-
-  // Clear the local data cache by deleting the data.json file that we are
-  // reading our package data from. We now have no data about server contents,
-  // including the release that we just published, so we have to sync to the
-  // server to get that information.
-  cleanLocalCache();
-
-  // Try to publish the package. Since the package references the release that
-  // we just published, it needs to resync with the server in order to be able
-  // to compile itself.
-  s.cd(newPack, function() {
-    run = s.run("publish", "--create");
-    run.waitSecs(20);
-    run.match("Done");
-    run.expectExit(0);
-  });
-
-  // Part 2.
-  // Make an app. It is basically an app.
-  cleanLocalCache();
-  run = s.run("create", "testApp");
-  run.waitSecs(10);
-  run.expectExit(0);
-
-  // Remove data.json again.
-  cleanLocalCache();
-
-  // Add our newly-created package to the app. That package only exists on the
-  // server, so we need to sync to get it.
-  s.cd("testApp", function () {
-    run = s.run("add", newPack);
-    run.waitSecs(5);
-    var match1 = run.match(/  added .*-([ab]) at version 1.0.0/);
-    var match2 = run.match(/  added .*-([ab]) at version 1.0.0/);
-    // the lines should be different:
-    selftest.expectEqual(match1[1] !== match2[1], true);
-    run.match("Test package");
-    run.expectExit(0);
-
-    // Run the app!
-    run = s.run();
-    run.waitSecs(15);
-    run.match("running at");
-    run.match("localhost");
-    run.stop();
-
-    // Remove data.json; run again! Make sure that we sync, because we are using
-    // a package that we don't know about. This is a pretty good imitation of
-    // the following workflow: you check out your friend's app from github, then
-    // run your newly installed meteor. So, clearly, it should not fail.
-    cleanLocalCache();
-    run = s.run();
-    run.waitSecs(15);
-    run.match("running at");
-    run.match("localhost");
-    run.stop();
-  });
-
-});
-
 // `packageName` should be a full package name (i.e. <username>:<package
 // name>), and the sandbox should be logged in as that username.
 var createAndPublishPackage = selftest.markStack(function (s, packageName) {
-  var run = s.run("create", "--package", packageName);
-  run.waitSecs(20);
-  run.expectExit(0);
-  s.cd(packageName, function (){
-    run = s.run("publish", "--create");
+  var packageDirName = "package-of-two-versions";
+  s.createPackage(packageDirName, packageName, "package-of-two-versions");
+  s.cd(packageDirName, function (){
+    var run = s.run("publish", "--create");
     run.waitSecs(25);
     run.expectExit(0);
   });
+  return packageDirName;
 });
 
-selftest.define("release track defaults to METEOR",
-                ["net", "test-package-server", "checkout"], function () {
-
+selftest.define("add package with no builds", ["net"], function () {
   var s = new Sandbox();
-  s.set("METEOR_TEST_TMP", files.mkdtemp());
-  testUtils.login(s, username, password);
-  var packageName = utils.randomToken();
-  var fullPackageName = username + ":" + packageName;
-  var releaseVersion = utils.randomToken();
+  // This depends on glasser:binary-package-with-no-builds@1.0.0 existing with
+  // no published builds.
 
-  // Create a package that has a versionsFrom for the just-published
-  // release, but without the release track present in the call to
-  // `versionsFrom`. This implies that it should be prefixed
-  // by "METEOR@"
-  var newPack = fullPackageName;
-  s.createPackage(newPack, "package-of-two-versions");
-  s.cd(newPack, function() {
-    var packOpen = s.read("package.js");
-    packOpen = packOpen + "\nPackage.onUse(function(api) { \n" +
-      "api.versionsFrom(\"" + releaseVersion + "\");\n" +
-      "api.use(\"" + fullPackageName + "\"); });";
-    s.write("package.js", packOpen);
-  });
-
-  // Try to publish the package. The error message should demonstrate
-  // that we indeed default to the METEOR release track when not
-  // specified.
-  s.cd(newPack, function() {
-    var run = s.run("publish", "--create");
-    run.waitSecs(20);
-    run.matchErr("Unknown release METEOR@" + releaseVersion);
-    run.expectExit(1);
-  });
-});
-
-//
-// THIS TEST RELIES ON THE TEST SERVER HAVING THE SAME RELEASE AS THE PRODUCTION
-// SERVER. YOU *CAN* RUN IT FROM RELEASE IFF YOU PUBLISH A CORRESPONDING RELEASE
-// TO THE TEST SERVER. (XXX: fix this post-0.9.0)
-//
-// XXX: This test is going to take progressively more time as we run more
-// tests, and perhaps checks too much information. We should consider
-// rethinking it in the future.
-selftest.define("update server package data unit test",
-                ["net", "test-package-server", "checkout", "slow"],
-                function () {
-  var s = new Sandbox();
-  var run;
-
-  var packageStorageFileDir = files.mkdtemp("update-server-package-data");
-
-  var rC = require('../catalog-remote.js');
-  var config = require('../config.js');
-  var packageStorage = new rC.RemoteCatalog();
-  var packageStorageFile =
-    config.getPackageStorage({root: packageStorageFileDir});
-  packageStorage.initialize({
-    packageStorage : packageStorageFile,
-    // Don't let this catalog refresh: we do that manually, and in any case the
-    // catalog isn't smart enough to refresh with the right URL.
-    offline: true
-  });
-  testUtils.login(s, username, password);
-
-  // Get the current data from the server. Once we publish new packages,
-  // we'll check that all this data still appears on disk and hasn't
-  // been overwritten.
-  packageClient.updateServerPackageData(packageStorage, {
-    packageServerUrl: selftest.testPackageServerUrl
-  });
-
-  var oldStorage = new DataStub(packageStorage);
-
-  var newPackageNames = [];
-  // Publish more than a (small) page worth of packages. When we pass the
-  // `useShortPages` option to updateServerPackageData, the server will send 3
-  // records at a time instead of 100, so this is more than a page.
-  _.times(5, function (i) {
-    var packageName = username + ":" + utils.randomToken();
-    createAndPublishPackage(s, packageName);
-    newPackageNames.push(packageName);
-  });
-
-  packageClient.updateServerPackageData(packageStorage, {
-    packageServerUrl: selftest.testPackageServerUrl,
-    useShortPages: true
-  });
-
-  selftest.doOrThrow(function () {
-    var packages = oldStorage.getAllPackageNames();
-    _.each(packages, function (p) {
-      // We could be more pedantic about comparing all the records, but it
-      // is a significant effort, time-wise to do that.
-      selftest.expectEqual(
-        packageStorage.getPackage(p), oldStorage.getPackage(p));
-      selftest.expectEqual(
-        packageStorage.getSortedVersions(p),
-        oldStorage.getSortedVersions(p));
-    });
-    var releaseTracks = oldStorage.getAllReleaseTracks;
-    _.each(releaseTracks, function (t) {
-      _.each(oldStorage.getSortedRecommendedReleaseVersions(t),
-             function (v) {
-               selftest.expectEqual(
-                 packageStorage.getReleaseVersion(t, v),
-                 oldStorage.getReleaseVersion(t, v));
-             });
-    });
-
-    // Check that our newly published packages appear in newData and on disk.
-    _.each(newPackageNames, function (name) {
-      var found = packageStorage.getPackage(name);
-      selftest.expectEqual(!! found, true);
-    });
-  });
-});
-
-
-// Add packages to an app. Change the contents of the packages and their
-// dependencies, make sure that the app still refreshes.
-selftest.define("package specifying a name",
-    ['test-package-server', "checkout"], function () {
-  var s = new Sandbox();
-  var run;
-
-  // Starting a run; introducing a new package overriding a core package.
-  s.createApp("myapp", "package-tests");
+  s.createApp("myapp", "empty");
   s.cd("myapp");
-  s.set("METEOR_TEST_TMP", files.mkdtemp());
-  run = s.run("add", "accounts-base");
-  run.waitSecs(40);
-  run.match("accounts-base");
 
-  run = s.run();
-  run.waitSecs(5);
-  run.match("myapp");
-  run.match("proxy");
-  run.match("MongoDB.\n");
+  var run = s.run("add", "glasser:binary-package-with-no-builds");
   run.waitSecs(10);
-  run.match("running at");
-  run.match("localhost");
-
-  s.cd("packages", function () {
-    s.createPackage("ac-fake", "fake-accounts-base");
-  });
-
-  run.waitSecs(5);
-  run.match("overriding accounts-base!");
-  run.match("restarted");
-  run.stop();
-
-  run = s.run('list');
-  run.match("accounts-base");
-  run.match("meteor");
-
-  // What about test-packages?
-  s.cd('packages');
-  s.cd('ac-fake');
-  run = s.run('test-packages', './');
-  run.waitSecs(15);
-  run.match("overriding accounts-base!");
-  run.stop();
-});
-
-selftest.define("talk to package server with expired or no accounts token",
-  ['net', 'test-package-server'], function () {
-  var s = new Sandbox();
-  testUtils.login(s, "test", "testtest");
-
-  // Revoke our credential by logging out.
-  var session = s.readSessionFile();
-  testUtils.logout(s);
-
-  testUtils.login(s, "testtest", "testtest");
-  var packageName = "testtest:" + utils.randomToken();
-  publishMostBasicPackage(s, packageName);
-  testUtils.logout(s);
-
-  // When we are not logged in, we should get prompted to log in when we
-  // run 'meteor admin maintainers --add'.
-  var run = s.run("admin", "maintainers", packageName,
-                  "--add", "foo");
-  run.waitSecs(15);
-  run.matchErr("Username:");
-  run.write("test\n");
-  run.matchErr("Password:");
-  run.write("testtest\n");
-  run.waitSecs(15);
-  // The 'test' user should not be a maintainer of
-  // meteor-platform. So this command should fail.
-  run.matchErr("You are not an authorized maintainer");
-  run.expectExit(1);
-
-  // Now restore our previous session, so that we now have an expired
-  // accounts token.
-  s.writeSessionFile(session);
-
-  run = s.run("admin", "maintainers", packageName, "--add", "foo");
-  run.waitSecs(15);
-  run.matchErr("have been logged out");
-  run.matchErr("Please log in");
-  run.matchErr("Username");
-  run.write("test\n");
-  run.matchErr("Password:");
-  run.write("testtest\n");
-  run.waitSecs(15);
-
-  run.matchErr("You are not an authorized maintainer");
+  run.matchErr("glasser:binary-package-with-no-builds@1.0.0");
+  run.matchErr("No compatible binary build found");
   run.expectExit(1);
 });
 
-// The cwd of 's' should be a package directory (i.e. with a package.js
-// file). Pass 'expectAuthorizationFailure' if you expect the publish
-// command to fail because the currently logged-in user is not an
-// authorized maintainer of the package.
-var changeVersionAndPublish = function (s, expectAuthorizationFailure) {
-  var packageJs = s.read("package.js");
-  // XXX Hack
-  var versionMatch = packageJs.match(/version: \'(\d\.\d\.\d)\'/);
-  if (! versionMatch) {
-    selftest.fail("package.js does not match version field: " + packageJs);
-  }
-  var version = versionMatch[1];
-  var versionParts = version.split(".");
-  versionParts[0] = parseInt(versionParts[0]) + 1;
-  packageJs = packageJs.replace(version, versionParts.join("."));
-  s.write("package.js", packageJs);
-
-  var run = s.run("publish");
-  run.waitSecs(60);
-  if (expectAuthorizationFailure) {
-    run.matchErr("not an authorized maintainer");
-    // XXX Why is this 3? Other unauthorized errors (e.g. maintainers
-    // --add when you are not a maintainer) exit 1
-    run.expectExit(3);
-  } else {
-    run.match("Done");
-    run.expectExit(0);
-  }
-};
-
-selftest.define("packages with organizations",
-    ["net", "test-package-server"], function () {
-  var s = new Sandbox();
-  testUtils.login(s, "test", "testtest");
-
-  var orgName = testUtils.createOrganization("test", "testtest");
-
-  // Publish a package with 'orgName' as the prefix.
-  var packageName = utils.randomToken();
-  var fullPackageName = orgName + ":" + packageName;
-  publishMostBasicPackage(s, fullPackageName);
-  s.cd(fullPackageName);
-
-  // 'test' should be a maintainer, as well as 'testtest', once
-  // 'testtest' is added to the org.
-  changeVersionAndPublish(s);
-  testUtils.login(s, "testtest", "testtest");
-  changeVersionAndPublish(s, true /* expect authorization failure */);
-  testUtils.login(s, "test", "testtest");
-  var run = s.run("admin", "members", orgName, "--add", "testtest");
-  run.waitSecs(15);
-  run.expectExit(0);
-  testUtils.login(s, "testtest", "testtest");
-  changeVersionAndPublish(s);
-
-  // Removing 'orgName' as a maintainer should fail.
-  run = s.run("admin", "maintainers", fullPackageName, "--remove", orgName);
-  run.waitSecs(15);
-  run.matchErr("remove the maintainer in the package prefix");
-  run.expectExit(1);
-
-  // Publish a package with 'test' as the prefix.
-  s.cd("..");
-  testUtils.login(s, "test", "testtest");
-  fullPackageName = "test:" + utils.randomToken();
-  publishMostBasicPackage(s, fullPackageName);
-  s.cd(fullPackageName);
-
-  // Add 'orgName' as a maintainer.
-  run = s.run("admin", "maintainers", fullPackageName, "--add", orgName);
-  run.waitSecs(15);
-  run.match("The maintainers for " + fullPackageName + " are");
-  run.match(orgName);
-  run.expectExit(0);
-
-  // 'testtest' should now be authorized.
-  testUtils.login(s, "testtest", "testtest");
-  changeVersionAndPublish(s);
-
-  // Remove 'orgName' as a maintainer: 'testtest' should no longer be
-  // authorized.
-  testUtils.login(s, "test", "testtest");
-  run = s.run("admin", "maintainers", fullPackageName, "--remove", orgName);
-  run.waitSecs(15);
-  run.match("The maintainers for " + fullPackageName + " are");
-  run.forbid(orgName);
-  run.expectExit(0);
-
-  testUtils.login(s, "testtest", "testtest");
-  changeVersionAndPublish(s, true /* expect authorization failure */);
-});
-
-selftest.define("add package with no builds", ["net", "test-package-server"], function () {
-  var s = new Sandbox();
-  testUtils.login(s, "test", "testtest");
-  var packageName = utils.randomToken();
-  var fullPackageName = "test:" + packageName;
-
-  // Create and publish a package with a binary dependency.
-
-  var run = s.run("create", "--package", fullPackageName);
-  run.waitSecs(15);
-  run.expectExit(0);
-
-  s.cd(fullPackageName, function () {
-    // Add a binary dependency.
-    var packageJs = s.read("package.js");
-    // XXX HACK: prepend Npm.depends to the first 'api.addFiles'
-    packageJs = packageJs.replace(
-      "api.addFiles",
-      "Npm.depends({ bcrypt: '0.7.7' });\n  api.addFiles"
-    );
-
-    s.write("package.js", packageJs);
-
-    run = s.run("publish", "--create");
-    run.waitSecs(60);
-    run.expectExit(0);
-  });
-
-  s.createApp("myapp", "package-tests");
-  s.cd("myapp");
-
-  run = s.run("add", fullPackageName);
-  run.waitSecs(30);
-  run.matchErr("Package " + fullPackageName +
-               " has no compatible build");
-  run.expectExit(1);
-
-  testUtils.logout(s);
-});
-
-selftest.define("package skeleton creates correct versionsFrom", function () {
+selftest.define("package skeleton creates correct versionsFrom", ['custom-warehouse'], function () {
   var s = new Sandbox({ warehouse: { v1: { recommended: true } } });
-  var fullPackageName = "test:" + utils.randomToken();
+  var token = utils.randomToken();
+  var fullPackageName = "test:" + token;
+  var fsPackageName = token;
 
   var run = s.run("create", "--package", fullPackageName);
   run.waitSecs(15);
+  run.match(fullPackageName);
   run.expectExit(0);
 
-  s.cd(fullPackageName);
+  s.cd(fsPackageName);
   var packageJs = s.read("package.js");
   if (! packageJs.match(/api.versionsFrom\('v1'\);/)) {
     selftest.fail("package.js missing correct 'api.versionsFrom':\n" +
@@ -928,31 +416,539 @@ selftest.define("package skeleton creates correct versionsFrom", function () {
   }
 });
 
-selftest.define("show unknown version of package", ["net", "test-package-server"], function () {
+selftest.define("show unknown version of package", function () {
   var s = new Sandbox();
-  var fullPackageName = "test:" + utils.randomToken();
 
-  var run = s.run("create", "--package", fullPackageName);
-  run.waitSecs(15);
+  // This version doesn't exist and is unlikely to exist.
+  var run = s.run("show", "meteor-base@0.123.456");
+  run.waitSecs(5);
+  run.matchErr("meteor-base@0.123.456: not found");
+  run.expectExit(1);
+});
+
+selftest.define("circular dependency errors", function () {
+  var s = new Sandbox();
+  // meteor add refreshes, but we don't need anything from the official catalog
+  // here.
+  s.set('METEOR_OFFLINE_CATALOG', 't');
+  var run;
+
+  // This app contains some pairs of packages with circular dependencies The app
+  // currently *uses* no packages, so it can be created successfully.
+  s.createApp("myapp", "circular-deps");
+  s.cd("myapp");
+
+  // Try to add one of a pair of circularly-depending packages. See an error.
+  run = s.run('add', 'first');
+  run.matchErr('error: circular dependency');
+  run.expectExit(1);
+
+  // Note that the app still builds fine because 'first' didn't actually get
+  // added.
+  run = s.run('--prepare-app');
   run.expectExit(0);
 
-  testUtils.login(s, "test", "testtest");
 
-  s.cd(fullPackageName, function () {
-    run = s.run("publish", "--create");
-    run.waitSecs(60);
+  // This pair has first-imply uses second-imply, second-imply implies
+  // first-imply.
+  run = s.run('add', 'first-imply');
+  run.matchErr('error: circular dependency');
+  run.expectExit(1);
+
+  // This pair has first-weak uses second-weak, second-weak uses first-weak
+  // weakly.  Currently, it's possible to add a weak cycle to an app (ie, the
+  // prepare-app step passes), but not to run the bundler. We don't want to
+  // write a test that prevents us from making the weak cycle an error at
+  // prepare-time, so let's skip straight to bundling.
+  s.write('.meteor/packages', 'first-weak');
+  run = s.run('--once');
+  run.matchErr('error: circular dependency');
+  run.expectExit(254);
+
+  // ... but we can add second-weak, which just doesn't pull in first-weak at
+  // all.
+  s.write('.meteor/packages', 'second-weak');
+  run = s.run('--once');
+  run.match(/first-weak.*removed from your project/);
+  run.expectExit(123);  // the app immediately calls process.exit(123)
+
+  // This pair has first-unordered uses second-unordered, second-unordered uses
+  // first-unordered unorderedly.  This should work just fine: that's why
+  // unordered exists!
+  s.write('.meteor/packages', 'first-unordered');
+  run = s.run('--once');
+  run.match(/first-unordered.*added/);
+  run.match(/second-unordered.*added/);
+  run.match(/second-weak.*removed from your project/);
+  run.expectExit(123);  // the app immediately calls process.exit(123)
+});
+
+// Runs 'meteor show <fullPackageName>' without a specified version and checks
+// that the output is correct.
+//
+// - s: sandbox in which to run commands
+// - fullPackageName: name of the package to show.
+// - options:
+//   - summary: Expected summary of the latest version.
+//   - description: longform description of the latest version
+//   - maintainers: the string of maintainers
+//   - homepage: Homepage url, if one was set.
+//   - git:  Git url, if one was set.
+//   - exports: exports string
+//   - implies: implies string
+//   - defaultVersion: version that git/exports/etc come from
+//   - versions: array of objects representing versions that we have
+//     published, with keys:
+//     - version: version number (ex: 0.9.9)
+//     - date: string we expect to see as the date.
+//     - label: string that we expect to see as the label. (ex: "installed")
+//   - addendum: a message to display at the bottom.
+//   - all: run 'meteor show' with the 'show-all' option.
+var testShowPackage =  selftest.markStack(function (s, fullPackageName, options) {
+  var run;
+  if (options.all) {
+    run = s.run("show", "--show-all", fullPackageName);
+  } else {
+    run = s.run("show", fullPackageName);
+  }
+  var packageName = options.defaultVersion ?
+    fullPackageName + "@" + options.defaultVersion : fullPackageName;
+  run.match("Package: " + packageName + "\n");
+  if (options.homepage) {
+    run.read("Homepage: " + options.homepage + "\n");
+  }
+  if (options.maintainers) {
+    run.read("Maintainers: " + options.maintainers + "\n");
+  }
+  if (options.git) {
+    run.read("Git: " + options.git + "\n");
+  }
+  if (options.exports) {
+    run.read("Exports: " + options.exports + "\n");
+  }
+  if (options.implies) {
+    run.read("Implies: " + options.implies + "\n");
+  }
+  run.read("\n");
+  if (_.has(options, "description")) {
+    run.read(options.description + "\n");
+  } else if (_.has(options, "summary")) {
+    run.read(options.summary + "\n");
+  }
+  if (options.versions) {
+    if (options.all) {
+      run.match("Versions:");
+    } else {
+      run.match("Recent versions:");
+    }
+    _.each(options.versions, function (version) {
+      run.match(version.version);
+      if (version.directory) {
+        run.match(version.directory + "\n");
+      } else {
+        run.match(version.date);
+        if (version.label) {
+          run.match(version.label + "\n");
+        } else {
+          run.match("\n");
+        }
+     }
+    });
+    run.read("\n");
+  }
+  if (options.addendum) {
+    run.read(options.addendum);
+  }
+  run.expectExit(0);
+});
+
+// Runs 'meteor show <name>@<version> and checks that the output is correct.
+//
+// - s: sandbox
+// - options:
+//  - packageName: name of the package.
+//  - version: version string.
+//  - summary: summary string of the package.
+//  - description: long-form description of the package
+//  - publishedBy: username of the publisher.
+//  - publishedOn: string of the publication time.
+//  - git: (optional) URL of the git repository.
+//  - dependencies: (optional) an array of objects representing dependencies:
+//    - name: package name
+//    - constraint: constraint, such as "1.0.0" or "=1.0.0" or null.
+//    - weak: true if this is a weak dependency.
+//  - addendum: a message that we expect to display at the very bottom.
+var testShowPackageVersion =  selftest.markStack(function (s, options) {
+  var name = options.packageName;
+  var version = options.version;
+  var run = s.run("show", name + "@" + version);
+  run.match("Package: " + name + "@" + version + "\n");
+  if (options.directory) {
+    run.match("Directory: " + options.directory + "\n");
+  }
+  if (options.exports) {
+    run.read("Exports: " + options.exports + "\n");
+  }
+  if (options.implies) {
+    run.read("Implies: " + options.implies + "\n");
+  }
+  if (options.git) {
+    run.match("Git: " + options.git + "\n");
+  }
+  if (_.has(options, "description")) {
+    run.read("\n");
+    run.read(options.description + "\n");
+  } else if (_.has(options, "summary")) {
+    run.read("\n");
+    run.read(options.summary + "\n");
+  }
+  if (options.dependencies) {
+    run.read("\n");
+    run.read("Depends on:\n");
+    // Use 'read' to ensure that these are the only dependencies listed.
+    _.each(options.dependencies, function (dep) {
+      var depStr = dep.name;
+      if (dep.constraint) {
+        depStr += "@" + dep.constraint;
+      }
+      if (dep.weak) {
+        depStr += " (weak dependency)";
+      }
+      run.read("  " + depStr + "\n");
+    });
+  }
+  if (options.publishedBy) {
+    run.match("\n");
+    run.match(
+      "Published by " + options.publishedBy +
+      " on " + options.publishedOn + ".\n");
+  }
+  if (options.addendum) {
+    run.read("\n" + options.addendum + "\n");
+  }
+  // Make sure that we exit without printing anything else.
+  run.expectEnd(0);
+});
+
+
+// For local packages without a version, we want to replace version information
+// with the string "local". We also want to make sure that querying for
+// 'name@local' gives that local version.
+selftest.define("show local package w/o version",  function () {
+  var s = new Sandbox();
+  var name = "my-local-package" + utils.randomToken();
+
+  // Create a package without version or summary; check that we can show its
+  // information without crashing.
+  s.createPackage(name, name, "package-for-show");
+  var packageDir = files.pathJoin(s.root, "home", name);
+
+  s.cd(name, function () {
+    s.cp("package-completely-empty.js", "package.js");
+    testShowPackage(s, name, {
+      defaultVersion: "local",
+      versions: [{ version: "local", directory: packageDir }]
+    });
+
+    testShowPackageVersion(s, {
+      packageName: name,
+      version: "local",
+      directory: packageDir
+    });
+
+    // Test that running without any arguments also shows this package.
+    var run = s.run("show");
+    run.match("Package: " + name + "@local\n");
+    run.match("Directory: " + packageDir + "\n");
     run.expectExit(0);
   });
 
-  run = s.run("show", fullPackageName);
+  // Test that running without any arguments outside of a package does not
+  // work.
+  var run = s.run("show");
+  run.matchErr("specify a package or release name");
+  run.expectExit(1);
+});
+
+// Make sure that a local-only package shows up correctly in show and search
+// results.
+selftest.define("show and search local package",  function () {
+  // Setup: create an app, containing a package. This local package should show
+  // up in the results of `meteor show` and `meteor search`.
+  var s = new Sandbox();
+  var name = "my-local-package" + utils.randomToken();
+  s.createApp("myapp", "empty");
+  s.cd("myapp");
+  s.mkdir("packages");
+  s.cd("packages", function () {
+    s.createPackage(name, name, "package-for-show");
+  });
+
+  var packageDir = files.pathJoin(s.root, "home", "myapp", "packages", name);
+  s.cd(packageDir, function () {
+    s.cp("package-with-git.js", "package.js");
+  });
+
+  var summary = 'This is a test package';
+  // Run `meteor show`, but don't add the package to the app yet. We should know
+  // that the package exists, even though it hasn't been added to the app.
+  testShowPackage(s, name, {
+    summary: summary,
+    defaultVersion: "local",
+    git: 'www.github.com/meteor/meteor',
+    versions: [{ version: "1.0.0", directory: packageDir }]
+  });
+
+  // Add the package to the app.
+  var run = s.run("add", name);
+  run.waitSecs(5);
+  run.expectExit(0);
+  testShowPackage(s, name, {
+    summary: summary,
+    git: 'www.github.com/meteor/meteor',
+    defaultVersion: "local",
+    versions: [{ version: "1.0.0", directory: packageDir }]
+  });
+
+  // When we run `meteor search`, we should be able to see the results for this
+  // package, even though it does not exist on the server.
+  run = s.run("search", name);
   run.waitSecs(15);
-  run.match("Version 1.0.0");
+  run.match(name);
+  run.match("You can use");
   run.expectExit(0);
 
-  run = s.run("show", fullPackageName + "@2.0.0");
-  run.waitSecs(15);
-  run.matchErr("2.0.0: unknown version of " + fullPackageName);
-  run.expectExit(1);
+  // We can see exports on local packages.
+  s.cd("packages");
+  summary = "This is a test package";
+  name = "my-local-exports";
+  packageDir = files.pathJoin(s.root, "home", "myapp", "packages", name);
+  s.createPackage(name, name, "package-for-show");
+  s.cd(name, function () {
+    s.cp("package-with-exports.js", "package.js");
+  });
 
-  testUtils.logout(s);
+  var exportStr =
+    "A, B (server), C (web.browser, web.cordova), D (web.browser), E (web.cordova), G (server, web.cordova)";
+  var description = "Test package.";
+
+  testShowPackage(s, name, {
+    summary: summary,
+    git: "www.github.com/meteor/meteor",
+    exports: exportStr,
+    description: description,
+    defaultVersion: "local",
+    versions: [{ version: "1.0.1", directory: packageDir }]
+  });
+  testShowPackageVersion(s, {
+    packageName: name,
+    version: "1.0.1",
+    directory: packageDir,
+    git: "www.github.com/meteor/meteor",
+    summary: summary,
+    exports: exportStr,
+    description: description
+  });
+
+  // Test showing implies. Since we are not going to build the package, we don't
+  // have to publish any of the things that we imply.
+  var impRaw = {
+    A: "",
+    B: "server",
+    C: "web.browser, web.cordova",
+    D: "web.browser",
+    E: "web.cordova",
+    G: "server, web.cordova"
+  };
+  var impliesData = _.sortBy(_.map(impRaw, function (label, placeholder) {
+    var name =  randomizedPackageName(username, placeholder.toLowerCase());
+    return { placeholder: placeholder, name: name, label: label};
+  }), 'name');
+  s.cd(name, function () {
+    s.cp("package-with-implies.js", "package.js");
+    var packOpen = s.read("package.js");
+    _.each(impliesData, function (d) {
+      var repReg = new RegExp("~" + d.placeholder + "~", "g");
+      packOpen = packOpen.replace(repReg, d.name);
+    });
+    s.write("package.js", packOpen);
+  });
+
+  summary = "This is a test package";
+  description = "Test package.";
+  var impArr = _.map(impliesData, function (d) {
+    return d.label ? d.name + " (" + d.label + ")" : d.name;
+  });
+  var impStr =
+    impArr[0] + ", " + impArr[1] + ", " +
+    impArr[2] + ", " + impArr[3] + ", " +
+    impArr[4] + ", " + impArr[5];
+
+  testShowPackage(s, name, {
+    summary: summary,
+    description: description,
+    implies: impStr,
+    directory: packageDir,
+    defaultVersion: "local",
+    git: "www.github.com/meteor/meteor",
+    versions: [{ version: "1.2.1", directory: packageDir }]
+  });
+
+  // Implies are also dependencies.
+  var deps = _.map(impliesData, function (d) {
+    return { name: d.name, constraint: "1.0.0" };
+  });
+  testShowPackageVersion(s, {
+    packageName: name,
+    version: "1.2.1",
+    directory: packageDir,
+    description: description,
+    summary: summary,
+    git: "www.github.com/meteor/meteor",
+    implies: impStr,
+    dependencies: deps
+  });
+});
+
+// This tests that we get the right excerpt out of the Readme.md in different
+// combinations. It doesn't test publication, because publishing is slow --
+// that's covered in a different test.
+selftest.define("show readme excerpt",  function () {
+  var s = new Sandbox();
+  var name = "my-local-package" + utils.randomToken();
+
+  // Create a package without version or summary; check that we can show its
+  // information without crashing.
+  s.createPackage(name, name, "package-for-show");
+  var packageDir = files.pathJoin(s.root, "home", name);
+
+  // We are just going to change the description in the Readme. Some things
+  // about this package are not going to change, and our test will be more
+  // legible to factor them out here.
+  var basePackageInfo = {
+    summary: "This is a test package",
+    defaultVersion: "local",
+    versions: [{ version: "0.9.9", directory: packageDir }]
+  };
+  var baseVersionInfo = {
+    summary: "This is a test package",
+    packageName: name,
+    version: "0.9.9",
+    directory: packageDir
+  };
+
+  s.cd(name);
+
+  // By default, we will use the README.md file for documentation.
+  // Start with a blank file. Nothing should show up!
+  s.write("README.md", "");
+  testShowPackage(s, name, basePackageInfo);
+  testShowPackageVersion(s, baseVersionInfo);
+
+  // An example of a standard readme.
+  var readme =
+        "Heading" + "\n" +
+        "========" + "\n" +
+        "foobar1" + "\n" +
+        "\n" +
+        "## Subheading" + "\n" +
+        "You should not see this line!";
+  s.write("README.md", readme);
+  testShowPackage(
+    s, name, _.extend({ description: "foobar1" }, basePackageInfo));
+  testShowPackageVersion(
+    s, _.extend({ description: "foobar1" }, baseVersionInfo));
+
+  // Another example -- we have hidden the excerpt under a different subheading.
+  readme =
+    "Heading" + "\n" +
+    "========" + "\n" +
+    "## Subheading" + "\n" +
+    "foobar2" + "\n" +
+    "## Another subheading" + "\n" +
+    "You should not see this line!";
+  s.write("README.md", readme);
+  testShowPackage(
+    s, name, _.extend({ description: "foobar2" }, basePackageInfo));
+  testShowPackageVersion(
+    s, _.extend({ description: "foobar2" }, baseVersionInfo));
+
+  // Generally, people skip a line between the header and the text, and
+  // sometimes, even between headers. (It is part of markdown, in fact.) Let's
+  // make sure that we handle that correctly.
+  readme =
+    "Heading" + "\n" +
+    "========" + "\n" + "\n" +
+    "## Subheading" + "\n" + "\n" +
+    "foobaz" + "\n" + "\n" +
+    "## Another subheading" + "\n" + "\n" +
+    "You should not see this line!";
+  s.write("README.md", readme);
+  testShowPackage(
+    s, name, _.extend({ description: "foobaz" }, basePackageInfo));
+  testShowPackageVersion(
+    s, _.extend({ description: "foobaz" }, baseVersionInfo));
+
+  // Some formatting in the text.
+  var excerpt =
+        "Here is a code sample:" + "\n\n" +
+        "```foobar and foobar```";
+  readme =
+    "Heading" + "\n" +
+    "========" + "\n" + "\n" +
+    excerpt + "\n\n" +
+    "# Subheading" + "\n" + "\n" +
+    "## Another subheading" + "\n" + "\n" +
+    "You should not see this line!";
+  s.write("README.md", readme);
+  testShowPackage(
+    s, name, _.extend({ description: excerpt }, basePackageInfo));
+  testShowPackageVersion(
+    s, _.extend({ description: excerpt }, baseVersionInfo));
+
+  // Now, let's try different file specifications for the documentation.
+  var git = "https:ilovegit.git";
+  var summary = "Test summary";
+  var staging = s.read("package-customizable.js");
+  staging = staging.replace(/~version~/g, "1.0.0");
+  staging = staging.replace(/~git~/g, git);
+  staging = staging.replace(/~summary~/g, summary);
+
+  // If we specify null, we have no docs.
+  s.write("package.js", staging.replace(/~documentation~/g, "null"));
+  baseVersionInfo = {
+    summary: summary,
+    git: git,
+    packageName: name,
+    version: "1.0.0",
+    directory: packageDir
+  };
+  basePackageInfo = {
+    git: git,
+    summary: summary,
+    defaultVersion: "local",
+    versions: [{ version: "1.0.0", directory: packageDir }]
+  };
+  testShowPackageVersion(s, baseVersionInfo);
+  testShowPackage(s, name, basePackageInfo);
+
+  // If we specify a different file, read that file.
+  s.write("package.js",
+          staging.replace(/~documentation~/g, "'Meteor-Readme.md'"));
+  readme = "A special Readme, just for Meteor.";
+  s.write("Meteor-Readme.md", "Title\n==\n" + readme);
+  testShowPackageVersion(s,
+    _.extend({ description: readme }, baseVersionInfo));
+  testShowPackage(s, name,
+    _.extend({ description: readme }, basePackageInfo));
+
+  // If we specify a non-existent file, tell us.
+  s.write("package.js",
+          staging.replace(/~documentation~/g, "'NOTHING'"));
+  var run = s.run("show", name);
+  run.matchErr("Documentation not found");
+  run.expectExit(1);
+  run = s.run("show", name + "@1.0.0");
+  run.matchErr("Documentation not found");
+  run.expectExit(1);
 });

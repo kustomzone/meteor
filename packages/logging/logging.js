@@ -97,7 +97,7 @@ Log._getCallerDetails = function () {
       return {file: "eval"};
     }
 
-    if (!line.match(/packages\/(?:local-test:)?logging(?:\/|\.js)/))
+    if (!line.match(/packages\/(?:local-test[:_])?logging(?:\/|\.js)/))
       break;
   }
 
@@ -260,7 +260,7 @@ Log.format = function (obj, options) {
 
   var prettify = function (line, color) {
     return (options.color && Meteor.isServer && color) ?
-      Npm.require('cli-color')[color](line) : line;
+      require('cli-color')[color](line) : line;
   };
 
   return prettify(metaPrefix, options.metaColor || META_COLOR) +

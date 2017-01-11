@@ -1,10 +1,14 @@
 # browser-policy
+[Source code of released version](https://github.com/meteor/meteor/tree/master/packages/browser-policy) | [Source code of development version](https://github.com/meteor/meteor/tree/devel/packages/browser-policy)
+***
 
 The `browser-policy` family of packages, part of
 [Webapp](https://www.meteor.com/webapp), lets you set security-related
 policies that will be enforced by newer browsers. These policies help
 you prevent and mitigate common attacks like cross-site scripting and
 clickjacking.
+
+## Details
 
 When you add `browser-policy` to your app, you get default configurations for
 the HTTP headers X-Frame-Options and Content-Security-Policy. X-Frame-Options
@@ -122,7 +126,7 @@ Disallows inline CSS.
 
 Finally, you can configure a whitelist of allowed requests that various types of
 content can make. The following functions are defined for the content types
-script, object, image, media, font, frame, and connect.
+script, object, image, media, font, frame, style, and connect.
 
 <dl>
 
